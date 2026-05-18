@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Clear Health — Meta Ads Performance</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="loading" class="loading-overlay">
+    <div class="spinner"></div>
+    <p>Loading data…</p>
+  </div>
+
+  <main id="app" class="hidden">
+    <header class="page-header">
+      <div>
+        <h1>Clear Health <span class="subtle">— Meta Ads Performance</span></h1>
+        <p class="subtitle"><span id="data-source">Live from Google Sheets</span> · <span id="data-range"></span></p>
+      </div>
+      <div class="header-actions">
+        <button id="refresh-btn" class="btn-secondary">Refresh</button>
+      </div>
+    </header>
+
+    <section class="date-bar">
+      <span class="label">Window:</span>
+      <div class="date-quick" id="date-quick">
+        <button data-days="3">3d</button>
+        <button data-days="7">7d</button>
+        <button data-days="14" class="active">14d</button>
+        <button data-days="30">30d</button>
+        <button data-days="all">All</button>
+      </div>
+      <span id="window-info" class="window-info"></span>
+    </section>
+
+    <section class="kpi-grid" id="kpi-grid"></section>
+
+    <section class="panel">
+      <header class="panel-header">
+        <h2>Overall Ads Performance</h2>
+        <div class="panel-controls">
+          <div class="toggle-group" id="overall-granularity">
+            <button data-gran="daily" class="active">Daily</button>
+            <button data-gran="weekly">Weekly</button>
+          </div>
+        </div>
+      </header>
+      <div class="metric-pills" id="overall-metrics"></div>
+      <div class="chart-wrap"><canvas id="overall-chart"></canvas></div>
+      <div class="summary-strip" id="overall-summary"></div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-header">
+        <h2>Campaign / Ad Set Performance</h2>
+        <div class="panel-controls">
+          <select id="campaign-select"></select>
+          <select id="adset-select"></select>
+          <div class="toggle-group" id="campaign-granularity">
+            <button data-gran="daily" class="active">Daily</button>
+            <button data-gran="weekly">Weekly</button>
+          </div>
+        </div>
+      </header>
+      <div class="metric-pills" id="campaign-metrics"></div>
+      <div class="chart-wrap"><canvas id="campaign-chart"></canvas></div>
+      <div class="summary-strip" id="campaign-summary"></div>
+    </section>
+
+    <footer class="page-footer">
+      <span id="last-refreshed"></span>
+      <span>·</span>
+      <span>Clear Health Meta Ads · ad set-level daily granularity</span>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
