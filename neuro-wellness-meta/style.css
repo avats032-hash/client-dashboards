@@ -147,8 +147,9 @@ main {
   display: inline-flex; align-items: center; gap: 6px;
 }
 .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-soft); }
-.pill:hover { border-color: var(--text-muted); color: var(--text); }
-.pill.active { color: var(--text); border-color: var(--text); background: #f1f5f9; }
+.pill:hover { border-color: var(--text-muted); color: var(--text); opacity: 1; }
+.pill.active { font-weight: 600; opacity: 1; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15); }
+.pill.active:hover { filter: brightness(1.08); }
 
 .chart-wrap { position: relative; height: 360px; width: 100%; }
 

@@ -296,8 +296,12 @@ function renderPills(containerId, activeMetrics, onChange) {
   const c = document.getElementById(containerId);
   c.innerHTML = METRICS.map(m => {
     const active = activeMetrics.includes(m.key);
-    return `<span class="pill${active ? " active" : ""}" data-key="${m.key}">
-      <span class="dot" style="background:${m.color}"></span>${m.label}
+    const style = active
+      ? `background:${m.color};border-color:${m.color};color:#fff;`
+      : "";
+    const dotStyle = active ? "background:#fff" : `background:${m.color}`;
+    return `<span class="pill${active ? " active" : ""}" data-key="${m.key}" style="${style}">
+      <span class="dot" style="${dotStyle}"></span>${m.label}${active ? " ✓" : ""}
     </span>`;
   }).join("");
   c.querySelectorAll(".pill").forEach(p => {
@@ -306,8 +310,8 @@ function renderPills(containerId, activeMetrics, onChange) {
       const idx = activeMetrics.indexOf(key);
       if (idx >= 0) activeMetrics.splice(idx, 1);
       else activeMetrics.push(key);
-      // Always keep at least one active
       if (activeMetrics.length === 0) activeMetrics.push(key);
+      renderPills(containerId, activeMetrics, onChange);
       onChange();
     });
   });
