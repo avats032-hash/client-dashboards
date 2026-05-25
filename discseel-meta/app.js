@@ -235,6 +235,16 @@ const state = {
 
 // ---------- KPI rendering ----------
 
+function prevWindowRows(allRows, days) {
+  if (days === "all") return [];
+  const range = dateRange(allRows);
+  if (!range) return [];
+  const cutoff = addDays(range.max, -(days - 1));
+  const prevEnd = addDays(cutoff, -1);
+  const prevStart = addDays(prevEnd, -(days - 1));
+  return allRows.filter(r => { const d = parseDate(r.date); return d >= prevStart && d <= prevEnd; });
+}
+
 function renderKPIs() {
   const grid = document.getElementById("kpi-grid");
   const filtered = filterByWindow(state.data.rows, state.windowDays);
@@ -377,11 +387,16 @@ function buildChart(canvasId, buckets, activeMetrics, granularity) {
 
 // ---------- Summary strip ----------
 
-function renderSummary(stripId, total, items) {
+function renderSummary(stripId, total, prevTotal, items) {
   const el = document.getElementById(stripId);
-  el.innerHTML = items.map(({ key, label }) =>
-    `<div class="stat"><span class="label">${label}</span><span class="value">${formatMetric(total[key], key)}</span></div>`
-  ).join("");
+  el.innerHTML = items.map(({ key, label }) => {
+    const delta = (prevTotal && state.windowDays !== "all") ? formatDelta(total[key], prevTotal[key]) : null;
+    return `<div class="stat">
+      <span class="label">${label}</span>
+      <span class="value">${formatMetric(total[key], key)}</span>
+      ${delta ? `<span class="delta ${delta.cls}">${delta.text}</span>` : ""}
+    </div>`;
+  }).join("");
 }
 
 // ---------- Overall panel ----------
@@ -393,7 +408,8 @@ function renderOverall() {
   state.overall.chart = buildChart("overall-chart", buckets, state.overall.activeMetrics, state.overall.granularity);
 
   const total = aggregate(filtered);
-  renderSummary("overall-summary", total, [
+  const prevTotal = aggregate(prevWindowRows(state.data.rows, state.windowDays));
+  renderSummary("overall-summary", total, prevTotal, [
     { key: "spend", label: "Spend" },
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks", label: "Link Clicks" },
@@ -431,7 +447,10 @@ function renderCampaign() {
   state.campaign.chart = buildChart("campaign-chart", buckets, state.campaign.activeMetrics, state.campaign.granularity);
 
   const total = aggregate(rows);
-  renderSummary("campaign-summary", total, [
+  let _prev = prevWindowRows(state.data.rows, state.windowDays);
+  if (state.campaign.selectedCampaign !== "__all__") _prev = _prev.filter(r => r.campaign === state.campaign.selectedCampaign);
+  if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") _prev = _prev.filter(r => r.adset === state.campaign.selectedAdset);
+  renderSummary("campaign-summary", total, aggregate(_prev), [
     { key: "spend", label: "Spend" },
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks", label: "Link Clicks" },

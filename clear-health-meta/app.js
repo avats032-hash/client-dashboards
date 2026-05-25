@@ -413,11 +413,16 @@ function buildChart(canvasId, buckets, activeMetrics, granularity) {
 
 // ---------- Summary strip ----------
 
-function renderSummary(stripId, total, items) {
+function renderSummary(stripId, total, prevTotal, items) {
   const el = document.getElementById(stripId);
-  el.innerHTML = items.map(({ key, label }) =>
-    `<div class="stat"><span class="label">${label}</span><span class="value">${formatMetric(total[key], key)}</span></div>`
-  ).join("");
+  el.innerHTML = items.map(({ key, label }) => {
+    const delta = (prevTotal && state.windowDays !== "all") ? formatDelta(total[key], prevTotal[key]) : null;
+    return `<div class="stat">
+      <span class="label">${label}</span>
+      <span class="value">${formatMetric(total[key], key)}</span>
+      ${delta ? `<span class="delta ${delta.cls}">${delta.text}</span>` : ""}
+    </div>`;
+  }).join("");
 }
 
 const SUMMARY_ITEMS = [
@@ -438,7 +443,7 @@ function renderOverall() {
   const buckets = groupByBucket(filtered, state.overall.granularity);
   if (state.overall.chart) state.overall.chart.destroy();
   state.overall.chart = buildChart("overall-chart", buckets, state.overall.activeMetrics, state.overall.granularity);
-  renderSummary("overall-summary", aggregate(filtered), SUMMARY_ITEMS);
+  renderSummary("overall-summary", aggregate(filtered), aggregate(previousWindowRows(state.rows, state.windowDays)), SUMMARY_ITEMS);
 }
 
 // ---------- Campaign panel ----------
@@ -469,7 +474,10 @@ function renderCampaign() {
   const buckets = groupByBucket(rows, state.campaign.granularity);
   if (state.campaign.chart) state.campaign.chart.destroy();
   state.campaign.chart = buildChart("campaign-chart", buckets, state.campaign.activeMetrics, state.campaign.granularity);
-  renderSummary("campaign-summary", aggregate(rows), SUMMARY_ITEMS);
+  let _prevCH = previousWindowRows(state.rows, state.windowDays);
+  if (state.campaign.selectedCampaign !== "__all__") _prevCH = _prevCH.filter(r => r.campaign === state.campaign.selectedCampaign);
+  if (state.campaign.selectedAdset !== "__all__") _prevCH = _prevCH.filter(r => r.adset === state.campaign.selectedAdset);
+  renderSummary("campaign-summary", aggregate(rows), aggregate(_prevCH), SUMMARY_ITEMS);
 }
 
 // ---------- Wiring ----------
