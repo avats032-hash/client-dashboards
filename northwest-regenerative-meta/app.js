@@ -4,7 +4,7 @@
 // Tab: "Northwest Regenerative" (gid=1580461449)
 // To update CSV_URL: File > Share > Publish to web > Northwest Regenerative tab > CSV > copy link
 
-const CSV_URL = "https://docs.google.com/spreadsheets/d/1mYYCqxrbujilD1IwZpXaY5QsbKSYlh-WxQQfSJkNbAk/export?format=csv&gid=1580461449";
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHcVrJY0-TgVXItIRKmM8TC7nsQWBeszcPDF4-iwRBdaDwbyCK6OdtVJJ_KZxxMp6dqP7tF_vgaHfz/pub?gid=1580461449&single=true&output=csv";
 
 // Result types treated as ENGAGEMENT (excluded from "Conversions" KPI).
 // Anything else with a non-empty Result Type counts as a conversion.
