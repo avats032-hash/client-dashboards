@@ -1,37 +1,27 @@
 // Clear Health — Meta Ads Performance Dashboard
 // Fetches a published Google Sheet CSV and renders KPI tiles + two interactive charts.
 //
-// Sheet columns:
-//   Date, Campaign, Ad set, Ad set ID, Impressions, Frequency, CPM,
-//   Amount spent (USD), Link clicks, Cost per link click,
-//   Result type, Results, Cost per result, Registrations, Cost per registration
-//
-// Result type values seen: "Purchase", "Event1"…"Event4" / "Event124".
-// Both Purchase and Event<n> rows count toward purchases (registration → purchase ratio).
+// Sheet columns (standard campaign_report.py format):
+//   Date, Campaign, Spend ($), Impressions, Reach, Frequency, CPM ($),
+//   Clicks (All), Link Clicks, CTR (%), Link CTR (%), Cost / Link Click ($),
+//   Result Type, Results, Cost / Result ($)
 
-const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRu22jxVc3EYoCCdVHloccctAI3-25GbD_GiL5xylPPfeMDLls6xWncWL2jbgJErCkh0hIu4Rn8LZXr/pub?output=csv";
+const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRu22jxVc3EYoCCdVHloccctAI3-25GbD_GiL5xylPPfeMDLls6xWncWL2jbgJErCkh0hIu4Rn8LZXr/pub?gid=2050793161&single=true&output=csv";
 
 const METRICS = [
-  { key: "spend",         label: "Amount Spent",          color: "#f59e0b", fmt: "currency", agg: "sum" },
-  { key: "impressions",   label: "Impressions",           color: "#94a3b8", fmt: "int",      agg: "sum" },
-  { key: "frequency",     label: "Frequency",             color: "#8b5cf6", fmt: "decimal",  agg: "ratio", num: "impressions", den: "reachEst" },
-  { key: "cpm",           label: "CPM",                   color: "#ef4444", fmt: "currency", agg: "ratio", num: "spend", den: "impressions", mul: 1000 },
-  { key: "linkClicks",    label: "Link Clicks",           color: "#06b6d4", fmt: "int",      agg: "sum" },
-  { key: "cpc",           label: "Cost / Link Click",     color: "#f97316", fmt: "currency", agg: "ratio", num: "spend", den: "linkClicks" },
-  { key: "purchases",     label: "Purchases (Results)",   color: "#4f46e5", fmt: "int",      agg: "sum" },
-  { key: "cpr",           label: "Cost / Purchase",       color: "#ec4899", fmt: "currency", agg: "ratio", num: "spend", den: "purchases" },
-  { key: "registrations", label: "Registrations",         color: "#22c55e", fmt: "int",      agg: "sum" },
-  { key: "cpreg",         label: "Cost / Registration",   color: "#14b8a6", fmt: "currency", agg: "ratio", num: "spend", den: "registrations" },
-  { key: "regToPurchase", label: "Reg → Purchase Ratio",  color: "#84cc16", fmt: "decimal",  agg: "ratio", num: "registrations", den: "purchases" },
+  { key: "spend",       label: "Amount Spent",        color: "#f59e0b", fmt: "currency", agg: "sum" },
+  { key: "impressions", label: "Impressions",          color: "#94a3b8", fmt: "int",      agg: "sum" },
+  { key: "reach",       label: "Reach",                color: "#7dd3fc", fmt: "int",      agg: "sum" },
+  { key: "frequency",   label: "Frequency",            color: "#8b5cf6", fmt: "decimal",  agg: "ratio", num: "impressions", den: "reach" },
+  { key: "cpm",         label: "CPM",                  color: "#ef4444", fmt: "currency", agg: "ratio", num: "spend", den: "impressions", mul: 1000 },
+  { key: "clicks",      label: "Clicks (All)",         color: "#a78bfa", fmt: "int",      agg: "sum" },
+  { key: "linkClicks",  label: "Link Clicks",          color: "#06b6d4", fmt: "int",      agg: "sum" },
+  { key: "ctr",         label: "CTR (%)",              color: "#34d399", fmt: "percent",  agg: "ratio", num: "clicks", den: "impressions", mul: 100 },
+  { key: "cpc",         label: "Cost / Link Click",    color: "#f97316", fmt: "currency", agg: "ratio", num: "spend", den: "linkClicks" },
+  { key: "results",     label: "Purchases (Results)",  color: "#4f46e5", fmt: "int",      agg: "sum" },
+  { key: "cpr",         label: "Cost / Purchase",      color: "#ec4899", fmt: "currency", agg: "ratio", num: "spend", den: "results" },
 ];
 const METRIC_BY_KEY = Object.fromEntries(METRICS.map(m => [m.key, m]));
-
-// A row's Result type counts toward purchases if it is "Purchase" or "Event<digits>".
-function isPurchaseRow(resultType) {
-  if (!resultType) return false;
-  const t = resultType.trim().toLowerCase();
-  return t === "purchase" || /^event\d+$/.test(t);
-}
 
 // ---------- CSV parsing ----------
 
@@ -48,7 +38,7 @@ function parseCSV(text) {
       if (c === '"') inQ = true;
       else if (c === ",") { cur.push(cell); cell = ""; }
       else if (c === "\n") { cur.push(cell); rows.push(cur); cur = []; cell = ""; }
-      else if (c === "\r") {} // ignore
+      else if (c === "\r") {}
       else cell += c;
     }
   }
@@ -64,50 +54,44 @@ function loadRows(csvText) {
   const headers = rows[0].map(h => h.trim());
   const idx = name => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
   const col = {
-    date: idx("Date"),
-    campaign: idx("Campaign"),
-    adset: idx("Ad set"),
-    impressions: idx("Impressions"),
-    frequency: idx("Frequency"),
-    cpm: idx("CPM"),
-    spend: idx("Amount spent (USD)"),
-    linkClicks: idx("Link clicks"),
-    cpc: idx("Cost per link click"),
-    resultType: idx("Result type"),
-    results: idx("Results"),
-    cpr: idx("Cost per result"),
-    registrations: idx("Registrations"),
-    cpreg: idx("Cost per registration"),
+    date:       idx("Date"),
+    campaign:   idx("Campaign"),
+    spend:      idx("Spend ($)"),
+    impressions:idx("Impressions"),
+    reach:      idx("Reach"),
+    frequency:  idx("Frequency"),
+    cpm:        idx("CPM ($)"),
+    clicks:     idx("Clicks (All)"),
+    linkClicks: idx("Link Clicks"),
+    ctr:        idx("CTR (%)"),
+    linkCtr:    idx("Link CTR (%)"),
+    cpc:        idx("Cost / Link Click ($)"),
+    resultType: idx("Result Type"),
+    results:    idx("Results"),
+    cpr:        idx("Cost / Result ($)"),
   };
   const out = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r[col.date]) continue;
-    const resultType = (r[col.resultType] || "").trim();
-    const results = num(r[col.results]);
-    const purchases = isPurchaseRow(resultType) ? results : 0;
     const impressions = num(r[col.impressions]);
-    const frequency = num(r[col.frequency]);
-    // Reach is not in the sheet — derive an estimate per row so frequency can be
-    // re-aggregated correctly (frequency = impressions / reach).
-    const reachEst = frequency > 0 ? impressions / frequency : 0;
+    const reach = num(r[col.reach]);
     out.push({
-      date: r[col.date].trim(),
-      campaign: (r[col.campaign] || "").trim(),
-      adset: (r[col.adset] || "").trim(),
+      date:       r[col.date].trim(),
+      campaign:   (r[col.campaign] || "").trim(),
+      spend:      num(r[col.spend]),
       impressions,
-      reachEst,
-      frequency,
-      cpm: num(r[col.cpm]),
-      spend: num(r[col.spend]),
+      reach,
+      frequency:  reach > 0 ? impressions / reach : num(r[col.frequency]),
+      cpm:        num(r[col.cpm]),
+      clicks:     num(r[col.clicks]),
       linkClicks: num(r[col.linkClicks]),
-      cpc: num(r[col.cpc]),
-      resultType,
-      results,
-      purchases,
-      cpr: num(r[col.cpr]),
-      registrations: num(r[col.registrations]),
-      cpreg: num(r[col.cpreg]),
+      ctr:        num(r[col.ctr]),
+      linkCtr:    num(r[col.linkCtr]),
+      cpc:        num(r[col.cpc]),
+      resultType: (r[col.resultType] || "").trim(),
+      results:    num(r[col.results]),
+      cpr:        num(r[col.cpr]),
     });
   }
   return out;
@@ -119,8 +103,7 @@ function parseDate(s) { return new Date(s + "T00:00:00Z"); }
 function fmtDate(d) { return d.toISOString().slice(0, 10); }
 function startOfWeek(d) {
   const x = new Date(d.getTime());
-  const day = x.getUTCDay();
-  const offset = (day + 6) % 7;
+  const offset = (x.getUTCDay() + 6) % 7;
   x.setUTCDate(x.getUTCDate() - offset);
   x.setUTCHours(0, 0, 0, 0);
   return x;
@@ -156,21 +139,16 @@ function previousWindowRows(rows, days) {
 }
 
 function emptyBucket(date) {
-  return {
-    date,
-    spend: 0, impressions: 0, reachEst: 0, linkClicks: 0,
-    purchases: 0, registrations: 0,
-  };
+  return { date, spend: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0, results: 0 };
 }
 
 function deriveBucket(g) {
-  g.frequency = g.reachEst > 0 ? g.impressions / g.reachEst : 0;
-  g.cpm = g.impressions > 0 ? g.spend / g.impressions * 1000 : 0;
-  g.cpc = g.linkClicks > 0 ? g.spend / g.linkClicks : 0;
-  g.cpr = g.purchases > 0 ? g.spend / g.purchases : 0;
-  g.cpreg = g.registrations > 0 ? g.spend / g.registrations : 0;
-  g.regToPurchase = g.purchases > 0 ? g.registrations / g.purchases : 0;
-  g.results = g.purchases; // alias
+  g.frequency = g.reach > 0 ? g.impressions / g.reach : 0;
+  g.cpm       = g.impressions > 0 ? g.spend / g.impressions * 1000 : 0;
+  g.cpc       = g.linkClicks > 0 ? g.spend / g.linkClicks : 0;
+  g.ctr       = g.impressions > 0 ? g.clicks / g.impressions * 100 : 0;
+  g.linkCtr   = g.impressions > 0 ? g.linkClicks / g.impressions * 100 : 0;
+  g.cpr       = g.results > 0 ? g.spend / g.results : 0;
   return g;
 }
 
@@ -182,12 +160,12 @@ function groupByBucket(rows, granularity) {
     const key = fmtDate(bucketDate);
     if (!groups.has(key)) groups.set(key, emptyBucket(key));
     const g = groups.get(key);
-    g.spend += r.spend;
-    g.impressions += r.impressions;
-    g.reachEst += r.reachEst;
+    g.spend      += r.spend;
+    g.impressions+= r.impressions;
+    g.reach      += r.reach;
+    g.clicks     += r.clicks;
     g.linkClicks += r.linkClicks;
-    g.purchases += r.purchases;
-    g.registrations += r.registrations;
+    g.results    += r.results;
   }
   const sorted = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date));
   for (const g of sorted) deriveBucket(g);
@@ -197,12 +175,12 @@ function groupByBucket(rows, granularity) {
 function aggregate(rows) {
   const total = emptyBucket("");
   for (const r of rows) {
-    total.spend += r.spend;
-    total.impressions += r.impressions;
-    total.reachEst += r.reachEst;
+    total.spend      += r.spend;
+    total.impressions+= r.impressions;
+    total.reach      += r.reach;
+    total.clicks     += r.clicks;
     total.linkClicks += r.linkClicks;
-    total.purchases += r.purchases;
-    total.registrations += r.registrations;
+    total.results    += r.results;
   }
   return deriveBucket(total);
 }
@@ -211,9 +189,9 @@ function aggregate(rows) {
 
 const fmt = {
   currency: v => "$" + (v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-  int: v => Math.round(v || 0).toLocaleString(),
-  decimal: v => (v || 0).toFixed(2),
-  percent: v => (v || 0).toFixed(2) + "%",
+  int:      v => Math.round(v || 0).toLocaleString(),
+  decimal:  v => (v || 0).toFixed(2),
+  percent:  v => (v || 0).toFixed(2) + "%",
 };
 function formatMetric(value, metricKey) {
   const m = METRIC_BY_KEY[metricKey];
@@ -222,8 +200,7 @@ function formatMetric(value, metricKey) {
 function formatDelta(curr, prev, metricKey) {
   if (!isFinite(curr) || !isFinite(prev) || prev === 0) return { text: "—", cls: "flat" };
   const diff = (curr - prev) / prev * 100;
-  // For cost metrics, lower is better — invert color.
-  const costMetric = ["cpm", "cpc", "cpr", "cpreg", "regToPurchase"].includes(metricKey);
+  const costMetric = ["cpm", "cpc", "cpr"].includes(metricKey);
   let cls;
   if (Math.abs(diff) < 0.5) cls = "flat";
   else if (costMetric) cls = diff > 0 ? "down" : "up";
@@ -247,8 +224,8 @@ function formatBucketLabel(dateStr, granularity) {
 // ---------- Chart axis assignment ----------
 
 function metricAxisType(key) {
-  if (["spend", "cpm", "cpc", "cpr", "cpreg"].includes(key)) return "yDollar";
-  if (["frequency", "regToPurchase"].includes(key)) return "yRatio";
+  if (["spend", "cpm", "cpc", "cpr"].includes(key)) return "yDollar";
+  if (["frequency", "ctr", "linkCtr"].includes(key)) return "yRatio";
   return "yCount";
 }
 
@@ -258,15 +235,14 @@ const state = {
   rows: [],
   windowDays: 14,
   overall: {
-    activeMetrics: ["spend", "purchases", "registrations"],
+    activeMetrics: ["spend", "results", "linkClicks"],
     granularity: "daily",
     chart: null,
   },
   campaign: {
-    activeMetrics: ["spend", "purchases", "regToPurchase"],
+    activeMetrics: ["spend", "results", "cpr"],
     granularity: "daily",
     selectedCampaign: "__all__",
-    selectedAdset: "__all__",
     chart: null,
   },
 };
@@ -281,19 +257,18 @@ function renderKPIs() {
   const prev = aggregate(prevRows);
 
   const tiles = [
-    { key: "spend",         label: "Amount Spent" },
-    { key: "purchases",     label: "Purchases" },
-    { key: "cpr",           label: "Cost / Purchase" },
-    { key: "registrations", label: "Registrations" },
-    { key: "regToPurchase", label: "Reg → Purchase" },
+    { key: "spend",   label: "Amount Spent" },
+    { key: "results", label: "Purchases" },
+    { key: "cpr",     label: "Cost / Purchase" },
+    { key: "linkClicks", label: "Link Clicks" },
+    { key: "cpc",     label: "Cost / Click" },
   ];
   grid.innerHTML = tiles.map(t => {
     const v = curr[t.key];
     const p = prev[t.key];
     const delta = state.windowDays === "all" ? { text: "", cls: "flat" } : formatDelta(v, p, t.key);
     const prevText = state.windowDays === "all" || !isFinite(p) || p === 0
-      ? ""
-      : `prev ${formatMetric(p, t.key)}`;
+      ? "" : `prev ${formatMetric(p, t.key)}`;
     return `<div class="kpi-tile">
       <span class="label">${t.label}</span>
       <span class="value">${formatMetric(v, t.key)}</span>
@@ -302,7 +277,6 @@ function renderKPIs() {
     </div>`;
   }).join("");
 
-  // Window info
   const range = dateRange(filtered);
   if (state.windowDays === "all") {
     const totalDays = range ? Math.round((range.max - range.min) / 86400000) + 1 : 0;
@@ -322,9 +296,7 @@ function renderPills(containerId, activeMetrics, onChange) {
   const c = document.getElementById(containerId);
   c.innerHTML = METRICS.map(m => {
     const active = activeMetrics.includes(m.key);
-    const style = active
-      ? `background:${m.color};border-color:${m.color};color:#fff;`
-      : "";
+    const style = active ? `background:${m.color};border-color:${m.color};color:#fff;` : "";
     const dotStyle = active ? "background:#fff" : `background:${m.color}`;
     return `<span class="pill${active ? " active" : ""}" data-key="${m.key}" style="${style}">
       <span class="dot" style="${dotStyle}"></span>${m.label}${active ? " ✓" : ""}
@@ -416,7 +388,7 @@ function buildChart(canvasId, buckets, activeMetrics, granularity) {
 function renderSummary(stripId, total, prevTotal, items) {
   const el = document.getElementById(stripId);
   el.innerHTML = items.map(({ key, label }) => {
-    const delta = (prevTotal && state.windowDays !== "all") ? formatDelta(total[key], prevTotal[key]) : null;
+    const delta = (prevTotal && state.windowDays !== "all") ? formatDelta(total[key], prevTotal[key], key) : null;
     return `<div class="stat">
       <span class="label">${label}</span>
       <span class="value">${formatMetric(total[key], key)}</span>
@@ -426,14 +398,14 @@ function renderSummary(stripId, total, prevTotal, items) {
 }
 
 const SUMMARY_ITEMS = [
-  { key: "spend", label: "Spend" },
-  { key: "impressions", label: "Impressions" },
+  { key: "spend",      label: "Spend" },
+  { key: "impressions",label: "Impressions" },
+  { key: "reach",      label: "Reach" },
   { key: "linkClicks", label: "Link Clicks" },
-  { key: "purchases", label: "Purchases" },
-  { key: "cpr", label: "Cost / Purchase" },
-  { key: "registrations", label: "Registrations" },
-  { key: "cpreg", label: "Cost / Reg" },
-  { key: "regToPurchase", label: "Reg → Purchase" },
+  { key: "cpc",        label: "Cost / Click" },
+  { key: "results",    label: "Purchases" },
+  { key: "cpr",        label: "Cost / Purchase" },
+  { key: "cpm",        label: "CPM" },
 ];
 
 // ---------- Overall panel ----------
@@ -454,30 +426,20 @@ function populateCampaignDropdown() {
   sel.innerHTML = `<option value="__all__">All Campaigns</option>` +
     campaigns.map(c => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`).join("");
 }
-function populateAdsetDropdown() {
-  const sel = document.getElementById("adset-select");
-  const camp = state.campaign.selectedCampaign;
-  let pool = state.rows;
-  if (camp !== "__all__") pool = pool.filter(r => r.campaign === camp);
-  const adsets = [...new Set(pool.map(r => r.adset).filter(Boolean))].sort();
-  sel.innerHTML = `<option value="__all__">All Ad Sets</option>` +
-    adsets.map(a => `<option value="${a.replace(/"/g, "&quot;")}">${a}</option>`).join("");
-}
+
 function renderCampaign() {
   let rows = filterByWindow(state.rows, state.windowDays);
   if (state.campaign.selectedCampaign !== "__all__") {
     rows = rows.filter(r => r.campaign === state.campaign.selectedCampaign);
   }
-  if (state.campaign.selectedAdset !== "__all__") {
-    rows = rows.filter(r => r.adset === state.campaign.selectedAdset);
-  }
   const buckets = groupByBucket(rows, state.campaign.granularity);
   if (state.campaign.chart) state.campaign.chart.destroy();
   state.campaign.chart = buildChart("campaign-chart", buckets, state.campaign.activeMetrics, state.campaign.granularity);
-  let _prevCH = previousWindowRows(state.rows, state.windowDays);
-  if (state.campaign.selectedCampaign !== "__all__") _prevCH = _prevCH.filter(r => r.campaign === state.campaign.selectedCampaign);
-  if (state.campaign.selectedAdset !== "__all__") _prevCH = _prevCH.filter(r => r.adset === state.campaign.selectedAdset);
-  renderSummary("campaign-summary", aggregate(rows), aggregate(_prevCH), SUMMARY_ITEMS);
+  let prevRows = previousWindowRows(state.rows, state.windowDays);
+  if (state.campaign.selectedCampaign !== "__all__") {
+    prevRows = prevRows.filter(r => r.campaign === state.campaign.selectedCampaign);
+  }
+  renderSummary("campaign-summary", aggregate(rows), aggregate(prevRows), SUMMARY_ITEMS);
 }
 
 // ---------- Wiring ----------
@@ -512,12 +474,6 @@ function wireEvents() {
   });
   document.getElementById("campaign-select").addEventListener("change", e => {
     state.campaign.selectedCampaign = e.target.value;
-    state.campaign.selectedAdset = "__all__";
-    populateAdsetDropdown();
-    renderCampaign();
-  });
-  document.getElementById("adset-select").addEventListener("change", e => {
-    state.campaign.selectedAdset = e.target.value;
     renderCampaign();
   });
   document.getElementById("refresh-btn").addEventListener("click", () => init(true));
@@ -535,7 +491,6 @@ async function init(force = false) {
     if (!state.rows.length) throw new Error("No rows in sheet");
 
     populateCampaignDropdown();
-    populateAdsetDropdown();
     renderPills("overall-metrics", state.overall.activeMetrics, renderOverall);
     renderPills("campaign-metrics", state.campaign.activeMetrics, renderCampaign);
     rerenderAll();
