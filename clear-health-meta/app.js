@@ -509,7 +509,218 @@ async function init(force = false) {
   }
 }
 
+// ─────────────────────────────────────────────
+// ADS / CREATIVE AUDIT TAB
+// ─────────────────────────────────────────────
+
+const ADS_JSON_URL = "./data/ads.json";
+
+const adsState = {
+  rows: [],       // raw daily rows from ads.json
+  sortCol: "spend",
+  sortDir: -1,    // -1 = desc
+  minSpend: 50,
+  adsetFilter: "__all__",
+};
+
+function adsStatus(cpe124, cpr) {
+  if (cpe124 === null) return "review";
+  if (cpe124 > 250) {
+    if (cpr !== null && cpr < 100) return "keep-warn";
+    return "kill";
+  }
+  return "keep";
+}
+
+function statusOrder(s) {
+  return { kill: 0, "keep-warn": 1, review: 2, keep: 3 }[s] ?? 4;
+}
+
+function filterAdsRows(allRows, days) {
+  if (!allRows.length) return [];
+  const range = dateRange(state.rows);  // use campaign rows for the window anchor
+  if (!range) return allRows;
+  if (days === "all") return allRows;
+  const cutoff = fmtDate(addDays(range.max, -(days - 1)));
+  return allRows.filter(r => r.Date >= cutoff);
+}
+
+function aggregateAds(rows) {
+  const byAd = new Map();
+  for (const r of rows) {
+    const key = r["Ad ID"];
+    if (!byAd.has(key)) {
+      byAd.set(key, {
+        adId: key,
+        adName: r["Ad Name"],
+        adSetName: r["Ad Set Name"],
+        adSetId: r["Ad Set ID"],
+        spend: 0, event124: 0, registrations: 0, purchases: 0,
+      });
+    }
+    const g = byAd.get(key);
+    g.spend        += r["Spend"] || 0;
+    g.event124     += r["Event124"] || 0;
+    g.registrations+= r["Registrations"] || 0;
+    g.purchases    += r["Purchases"] || 0;
+  }
+  const out = [];
+  for (const g of byAd.values()) {
+    g.spend        = Math.round(g.spend * 100) / 100;
+    g.cpe124       = g.event124 > 0 ? Math.round(g.spend / g.event124 * 100) / 100 : null;
+    g.cpr          = g.registrations > 0 ? Math.round(g.spend / g.registrations * 100) / 100 : null;
+    g.cpp          = g.purchases > 0 ? Math.round(g.spend / g.purchases * 100) / 100 : null;
+    g.status       = adsStatus(g.cpe124, g.cpr);
+    out.push(g);
+  }
+  return out;
+}
+
+function renderAdsKPIs(ads) {
+  const grid = document.getElementById("ads-kpi-grid");
+  const totalSpend = ads.reduce((s, a) => s + a.spend, 0);
+  const totalEv = ads.reduce((s, a) => s + a.event124, 0);
+  const totalRegs = ads.reduce((s, a) => s + a.registrations, 0);
+  const totalPurch = ads.reduce((s, a) => s + a.purchases, 0);
+  const blendedCPE = totalEv > 0 ? totalSpend / totalEv : null;
+  const blendedCPR = totalRegs > 0 ? totalSpend / totalRegs : null;
+  const blendedCPP = totalPurch > 0 ? totalSpend / totalPurch : null;
+  const killCount = ads.filter(a => a.status === "kill").length;
+  const keepCount = ads.filter(a => a.status === "keep" || a.status === "keep-warn").length;
+
+  const tiles = [
+    { label: "Total Spend",   value: "$" + totalSpend.toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2}), color: "#f59e0b" },
+    { label: "Event124",      value: totalEv.toLocaleString(), sub: blendedCPE ? "CPE $" + blendedCPE.toFixed(2) : "—", color: "#6366f1" },
+    { label: "Registrations", value: totalRegs.toLocaleString(), sub: blendedCPR ? "CPR $" + blendedCPR.toFixed(2) : "—", color: "#06b6d4" },
+    { label: "Purchases",     value: totalPurch.toLocaleString(), sub: blendedCPP ? "CPP $" + blendedCPP.toFixed(2) : "—", color: "#10b981" },
+    { label: "Kill Signals",  value: killCount, sub: keepCount + " keep/review", color: "#ef4444" },
+  ];
+  grid.innerHTML = tiles.map(t => `<div class="kpi-tile">
+    <span class="label">${t.label}</span>
+    <span class="value" style="color:${t.color}">${t.value}</span>
+    ${t.sub ? `<span class="prev">${t.sub}</span>` : ""}
+  </div>`).join("");
+}
+
+function renderAdsTable() {
+  const windowRows = filterAdsRows(adsState.rows, state.windowDays);
+  let ads = aggregateAds(windowRows);
+
+  // Filters
+  ads = ads.filter(a => a.spend >= adsState.minSpend);
+  if (adsState.adsetFilter !== "__all__") {
+    ads = ads.filter(a => a.adSetId === adsState.adsetFilter);
+  }
+
+  // Sort
+  const col = adsState.sortCol;
+  const dir = adsState.sortDir;
+  ads.sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (col === "status") { va = statusOrder(va); vb = statusOrder(vb); }
+    if (va === null || va === undefined) va = dir > 0 ? -Infinity : Infinity;
+    if (vb === null || vb === undefined) vb = dir > 0 ? -Infinity : Infinity;
+    if (typeof va === "string") return dir * va.localeCompare(vb);
+    return dir * (va - vb);
+  });
+
+  renderAdsKPIs(ads);
+
+  const $c = v => v != null ? "$" + v.toFixed(2) : "—";
+  const $n = v => v ? v.toLocaleString() : "—";
+
+  const BADGE = {
+    kill: `<span class="badge kill">KILL</span>`,
+    "keep-warn": `<span class="badge keep-warn">KEEP ⚠</span>`,
+    keep: `<span class="badge keep">KEEP</span>`,
+    review: `<span class="badge review">REVIEW</span>`,
+  };
+
+  const tbody = document.getElementById("ads-tbody");
+  tbody.innerHTML = ads.map(a => {
+    const name = a.adName.length > 55 ? a.adName.slice(0, 55) + "…" : a.adName;
+    return `<tr class="row-${a.status}">
+      <td title="${a.adName.replace(/"/g,'&quot;')}">${name}</td>
+      <td>${a.adSetName}</td>
+      <td class="num">$${a.spend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="num">${$n(a.event124)}</td>
+      <td class="num">${$c(a.cpe124)}</td>
+      <td class="num">${$n(a.registrations)}</td>
+      <td class="num">${$c(a.cpr)}</td>
+      <td class="num">${$n(a.purchases)}</td>
+      <td class="num">${$c(a.cpp)}</td>
+      <td>${BADGE[a.status] || ""}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("ads-footer").textContent =
+    `${ads.length} creatives · window: ${state.windowDays === "all" ? "all time" : state.windowDays + "d"} · min spend $${adsState.minSpend}`;
+
+  // Mark sort column
+  document.querySelectorAll("#ads-table th").forEach(th => {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.col === col) th.classList.add(dir > 0 ? "sort-asc" : "sort-desc");
+  });
+}
+
+function populateAdsetFilter(rows) {
+  const sel = document.getElementById("ads-adset-filter");
+  const adsets = [...new Map(rows.map(r => [r["Ad Set ID"], r["Ad Set Name"]])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  sel.innerHTML = `<option value="__all__">All Ad Sets</option>` +
+    adsets.map(([id, name]) => `<option value="${id}">${name}</option>`).join("");
+}
+
+function wireAdsEvents() {
+  document.querySelectorAll("#ads-table th.sortable").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (adsState.sortCol === col) adsState.sortDir *= -1;
+      else { adsState.sortCol = col; adsState.sortDir = col === "adName" || col === "adSetName" || col === "status" ? 1 : -1; }
+      renderAdsTable();
+    });
+  });
+  document.getElementById("ads-min-spend").addEventListener("change", e => {
+    adsState.minSpend = parseFloat(e.target.value) || 0;
+    renderAdsTable();
+  });
+  document.getElementById("ads-adset-filter").addEventListener("change", e => {
+    adsState.adsetFilter = e.target.value;
+    renderAdsTable();
+  });
+}
+
+async function loadAdsData() {
+  try {
+    const res = await fetch(ADS_JSON_URL + "?_=" + Date.now());
+    if (!res.ok) throw new Error(res.status);
+    const json = await res.json();
+    adsState.rows = json.rows || [];
+    populateAdsetFilter(adsState.rows);
+    const updated = json.updated || "";
+    document.getElementById("ads-updated").textContent = updated ? "Updated " + updated : "";
+  } catch (err) {
+    console.warn("Could not load ads.json:", err.message);
+    adsState.rows = [];
+  }
+}
+
+// ─────────────────────────────────────────────
+// TAB SWITCHING
+// ─────────────────────────────────────────────
+
+function switchTab(tab) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.getElementById("tab-campaigns").classList.toggle("hidden", tab !== "campaigns");
+  document.getElementById("tab-ads").classList.toggle("hidden", tab !== "ads");
+  if (tab === "ads") renderAdsTable();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireEvents();
+  wireAdsEvents();
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
   init();
 });

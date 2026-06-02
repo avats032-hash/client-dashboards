@@ -37,43 +37,98 @@
       <span id="window-info" class="window-info"></span>
     </section>
 
-    <section class="kpi-grid" id="kpi-grid"></section>
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="campaigns">Campaign Overview</button>
+      <button class="tab-btn" data-tab="ads">Creative Audit</button>
+    </nav>
 
-    <section class="panel">
-      <header class="panel-header">
-        <h2>Overall Ads Performance</h2>
-        <div class="panel-controls">
-          <div class="toggle-group" id="overall-granularity">
-            <button data-gran="daily" class="active">Daily</button>
-            <button data-gran="weekly">Weekly</button>
-          </div>
-        </div>
-      </header>
-      <div class="metric-pills" id="overall-metrics"></div>
-      <div class="chart-wrap"><canvas id="overall-chart"></canvas></div>
-      <div class="summary-strip" id="overall-summary"></div>
-    </section>
+    <!-- ── CAMPAIGNS TAB ── -->
+    <div id="tab-campaigns">
+      <section class="kpi-grid" id="kpi-grid"></section>
 
-    <section class="panel">
-      <header class="panel-header">
-        <h2>Campaign Performance</h2>
-        <div class="panel-controls">
-          <select id="campaign-select"></select>
-          <div class="toggle-group" id="campaign-granularity">
-            <button data-gran="daily" class="active">Daily</button>
-            <button data-gran="weekly">Weekly</button>
+      <section class="panel">
+        <header class="panel-header">
+          <h2>Overall Ads Performance</h2>
+          <div class="panel-controls">
+            <div class="toggle-group" id="overall-granularity">
+              <button data-gran="daily" class="active">Daily</button>
+              <button data-gran="weekly">Weekly</button>
+            </div>
           </div>
+        </header>
+        <div class="metric-pills" id="overall-metrics"></div>
+        <div class="chart-wrap"><canvas id="overall-chart"></canvas></div>
+        <div class="summary-strip" id="overall-summary"></div>
+      </section>
+
+      <section class="panel">
+        <header class="panel-header">
+          <h2>Campaign Performance</h2>
+          <div class="panel-controls">
+            <select id="campaign-select"></select>
+            <div class="toggle-group" id="campaign-granularity">
+              <button data-gran="daily" class="active">Daily</button>
+              <button data-gran="weekly">Weekly</button>
+            </div>
+          </div>
+        </header>
+        <div class="metric-pills" id="campaign-metrics"></div>
+        <div class="chart-wrap"><canvas id="campaign-chart"></canvas></div>
+        <div class="summary-strip" id="campaign-summary"></div>
+      </section>
+    </div>
+
+    <!-- ── ADS / CREATIVE AUDIT TAB ── -->
+    <div id="tab-ads" class="hidden">
+      <section class="kpi-grid" id="ads-kpi-grid"></section>
+
+      <section class="panel">
+        <header class="panel-header">
+          <h2>Creative Performance</h2>
+          <div class="panel-controls">
+            <label class="filter-label">
+              Min spend $<input id="ads-min-spend" type="number" value="50" min="0" step="10" style="width:58px">
+            </label>
+            <select id="ads-adset-filter">
+              <option value="__all__">All Ad Sets</option>
+            </select>
+            <span class="ads-updated" id="ads-updated"></span>
+          </div>
+        </header>
+        <div class="ads-framework">
+          <strong>Decision rules:</strong>
+          <span class="badge kill">KILL</span> CPE124 &gt; $250 &amp; CPR &gt; $100 &nbsp;·&nbsp;
+          <span class="badge keep-warn">KEEP ⚠</span> CPE124 &gt; $250 but CPR &lt; $100 &nbsp;·&nbsp;
+          <span class="badge keep">KEEP</span> CPE124 ≤ $250 &nbsp;·&nbsp;
+          <span class="badge review">REVIEW</span> No Event124 data
         </div>
-      </header>
-      <div class="metric-pills" id="campaign-metrics"></div>
-      <div class="chart-wrap"><canvas id="campaign-chart"></canvas></div>
-      <div class="summary-strip" id="campaign-summary"></div>
-    </section>
+        <div class="table-wrap">
+          <table class="ads-table" id="ads-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-col="adName">Creative</th>
+                <th class="sortable" data-col="adSetName">Ad Set</th>
+                <th class="sortable num" data-col="spend">Spend</th>
+                <th class="sortable num" data-col="event124">Ev.124</th>
+                <th class="sortable num" data-col="cpe124">CPE124</th>
+                <th class="sortable num" data-col="registrations">Regs</th>
+                <th class="sortable num" data-col="cpr">CPR</th>
+                <th class="sortable num" data-col="purchases">Purch.</th>
+                <th class="sortable num" data-col="cpp">CPP</th>
+                <th class="sortable" data-col="status">Status</th>
+              </tr>
+            </thead>
+            <tbody id="ads-tbody"></tbody>
+          </table>
+        </div>
+        <div class="table-footer" id="ads-footer"></div>
+      </section>
+    </div>
 
     <footer class="page-footer">
       <span id="last-refreshed"></span>
       <span>·</span>
-      <span>Clear Health Meta Ads · campaign-level daily granularity</span>
+      <span id="footer-label">Clear Health Meta Ads · campaign-level daily granularity</span>
     </footer>
   </main>
 
