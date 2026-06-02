@@ -502,6 +502,8 @@ async function init(force = false) {
 
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
+
+    loadAdsData();
   } catch (err) {
     console.error(err);
     document.getElementById("loading").innerHTML =
@@ -680,11 +682,13 @@ function wireAdsEvents() {
       renderAdsTable();
     });
   });
-  document.getElementById("ads-min-spend").addEventListener("change", e => {
+  const minSpend = document.getElementById("ads-min-spend");
+  if (minSpend) minSpend.addEventListener("change", e => {
     adsState.minSpend = parseFloat(e.target.value) || 0;
     renderAdsTable();
   });
-  document.getElementById("ads-adset-filter").addEventListener("change", e => {
+  const adsetFilter = document.getElementById("ads-adset-filter");
+  if (adsetFilter) adsetFilter.addEventListener("change", e => {
     adsState.adsetFilter = e.target.value;
     renderAdsTable();
   });
@@ -711,8 +715,17 @@ async function loadAdsData() {
 
 function switchTab(tab) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  document.getElementById("tab-campaigns").classList.toggle("hidden", tab !== "campaigns");
-  document.getElementById("tab-ads").classList.toggle("hidden", tab !== "ads");
+  const campaignsEl = document.getElementById("tab-campaigns");
+  const adsEl = document.getElementById("tab-ads");
+  if (campaignsEl && adsEl) {
+    if (tab === "ads") {
+      campaignsEl.classList.add("hidden");
+      adsEl.classList.remove("hidden");
+    } else {
+      campaignsEl.classList.remove("hidden");
+      adsEl.classList.add("hidden");
+    }
+  }
   if (tab === "ads") renderAdsTable();
 }
 
