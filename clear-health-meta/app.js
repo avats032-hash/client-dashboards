@@ -444,7 +444,11 @@ function renderCampaign() {
 
 // ---------- Wiring ----------
 
-function rerenderAll() { renderKPIs(); renderOverall(); renderCampaign(); }
+function rerenderAll() {
+  renderKPIs(); renderOverall(); renderCampaign();
+  const adsEl = document.getElementById("tab-ads");
+  if (adsEl && !adsEl.classList.contains("hidden")) renderAdsTable();
+}
 
 function wireEvents() {
   document.querySelectorAll("#date-quick button").forEach(b => {
