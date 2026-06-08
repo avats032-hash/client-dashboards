@@ -566,64 +566,38 @@ function campaignOf(adSetId, adSetName) {
 // lags — it is NEVER used to kill (it would pause ads before their true purchases
 // land, the worst automation mistake on a long-consideration product). Event124 /
 // CPE124 are shown for reporting and manual validation only.
-const FW = {
-  REG_GATE: 150,     // Stage 2 — registration gate (cumulative spend)
-  MATRIX_GATE: 450,  // Stage 3 — the matrix (cumulative spend)
-  CPR_GOOD: 100,     // cost / registration — good
-  CPR_WEAK: 150,     // cost / registration — weak
-  CPP_GOOD: 250,     // pixel cost / purchase — good (test stage)
-  CPP_WEAK: 350,     // pixel cost / purchase — weak
+// Decision matrix — Cost per Event124 (true offline purchase) × Cost per Registration.
+// The ONLY kill is when BOTH are bad: cheap registrations redeem a high purchase cost
+// (those buyers convert later). This is a MANUAL review aid — Event124 is offline and
+// lags, so do NOT replicate this in Meta automated rules (it would pause ads before
+// their true purchases land).
+const DEC = {
+  CPE124_MAX: 250,  // cost / Event124 — above this is "bad"
+  CPR_MAX: 100,     // cost / registration — above this is "bad"
 };
 
-function isCostCap(adSetName) {
-  return /cost[\s-]?cap|best\s*perform/i.test(adSetName || "");
-}
-
-// Returns { code, reason } per the framework creative lifecycle.
-// NOTE: gates read CUMULATIVE spend — use the "All" window for true lifetime verdicts.
 function adsStatus(ad) {
-  const { spend, registrations, purchases, cpr, cpp, campaign, adSetName } = ad;
-  const d = n => (n == null ? "∞" : "$" + Math.round(n));
+  const { cpe124, cpr } = ad;
+  const d = n => (n == null ? "—" : "$" + Math.round(n));
 
-  // Cost-Cap CBO = graduated winners. Exempt from test-stage kills — judged on
-  // fatigue / 7-day rolling CAC manually (Stage 8), never auto-killed.
-  if (isCostCap(campaign || adSetName))
-    return { code: "protected", reason: "Cost-Cap engine — graduated winner; judge on fatigue, exempt from test-stage kills" };
+  // No Event124 yet ⇒ can't judge on the purchase metric.
+  if (cpe124 === null)
+    return { code: "review", reason: "No Event124 yet — can't judge cost/purchase" };
 
-  // Below the registration gate: not enough spend to judge. The soft-metric screen
-  // (hook rate / CTR) is a manual call and those metrics aren't in this feed.
-  if (spend < FW.REG_GATE)
-    return { code: "watch", reason: `Pre-gate ($${Math.round(spend)} < $${FW.REG_GATE}) — ride to the reg gate` };
+  if (cpe124 > DEC.CPE124_MAX) {
+    // High purchase cost, but cheap registrations redeem it ⇒ keep (watch).
+    if (cpr !== null && cpr < DEC.CPR_MAX)
+      return { code: "keep-warn", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} but cheap regs (CPR ${d(cpr)} <$${DEC.CPR_MAX}) — keep` };
+    // High purchase cost AND no cheap-lead signal ⇒ kill.
+    return { code: "kill", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} & CPR ${d(cpr)} (>$${DEC.CPR_MAX}) — kill` };
+  }
 
-  // Stage 2 — Registration gate ($150): 0 registrations ⇒ KILL.
-  // Guard: a logged purchase (even with 0 tracked regs) means it converted — not dead.
-  if (registrations === 0 && purchases === 0)
-    return { code: "kill", reason: `Reg gate: $${Math.round(spend)} spent, 0 registrations` };
-
-  // Between reg gate and matrix gate: has ≥1 reg — keep riding to $450
-  if (spend < FW.MATRIX_GATE)
-    return { code: "keep", reason: `Passed reg gate (CPR ${d(cpr)}) — ride to the $${FW.MATRIX_GATE} matrix` };
-
-  // Stage 3 — The matrix ($450): read CPR + pixel CPP together. Only the
-  // bottom-right quadrant (weak regs AND weak purchases) kills.
-  const cprGood = cpr !== null && cpr <= FW.CPR_GOOD;
-  const cprWeak = cpr === null || cpr > FW.CPR_WEAK;
-  const cppGood = cpp !== null && cpp <= FW.CPP_GOOD;
-  const cppWeak = purchases === 0 || (cpp !== null && cpp > FW.CPP_WEAK);
-
-  if (cprWeak && cppWeak)
-    return { code: "kill", reason: `Matrix kill: CPR ${d(cpr)} (>$${FW.CPR_WEAK}) & ${purchases === 0 ? "0 purchases" : "CPP " + d(cpp) + " (>$" + FW.CPP_WEAK + ")"}` };
-  if (cprGood && cppGood)
-    return { code: "winner", reason: `Winner: CPR ${d(cpr)} ≤$${FW.CPR_GOOD} & CPP ${d(cpp)} ≤$${FW.CPP_GOOD} — validate & scale` };
-  if (cprGood)
-    return { code: "keep", reason: `TOF feeder: cheap regs (CPR ${d(cpr)}), purchases lag — buyers convert later` };
-  if (cppGood)
-    return { code: "keep", reason: `Retargeting creative: ${purchases} purch @ ${d(cpp)}, regs pricey (CPR ${d(cpr)})` };
-  return { code: "keep", reason: "Mid-quadrant — not a kill; only weak-regs + weak-purchases kills" };
+  // CPE124 ≤ $250 ⇒ keep, regardless of CPR.
+  return { code: "keep", reason: `CPE124 ${d(cpe124)} ≤$${DEC.CPE124_MAX} — keep` };
 }
 
 function statusOrder(s) {
-  return { kill: 0, winner: 1, watch: 2, keep: 3, protected: 4 }[s] ?? 5;
+  return { kill: 0, "keep-warn": 1, review: 2, keep: 3 }[s] ?? 4;
 }
 
 function filterAdsRows(allRows, days) {
@@ -679,15 +653,15 @@ function renderAdsKPIs(ads) {
   const blendedCPR = totalRegs > 0 ? totalSpend / totalRegs : null;
   const blendedCPP = totalPurch > 0 ? totalSpend / totalPurch : null;
   const killCount = ads.filter(a => a.status === "kill").length;
-  const winnerCount = ads.filter(a => a.status === "winner").length;
-  const watchCount = ads.filter(a => a.status === "watch").length;
+  const keepCount = ads.filter(a => a.status === "keep" || a.status === "keep-warn").length;
+  const reviewCount = ads.filter(a => a.status === "review").length;
 
   const tiles = [
     { label: "Total Spend",   value: "$" + totalSpend.toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:2}), color: "#f59e0b" },
     { label: "Event124",      value: totalEv.toLocaleString(), sub: blendedCPE ? "CPE $" + blendedCPE.toFixed(2) : "—", color: "#6366f1" },
     { label: "Registrations", value: totalRegs.toLocaleString(), sub: blendedCPR ? "CPR $" + blendedCPR.toFixed(2) : "—", color: "#06b6d4" },
     { label: "Purchases",     value: totalPurch.toLocaleString(), sub: blendedCPP ? "CPP $" + blendedCPP.toFixed(2) : "—", color: "#10b981" },
-    { label: "Kill Signals",  value: killCount, sub: `${winnerCount} winners · ${watchCount} watch`, color: "#ef4444" },
+    { label: "Kill Signals",  value: killCount, sub: `${keepCount} keep · ${reviewCount} review`, color: "#ef4444" },
   ];
   grid.innerHTML = tiles.map(t => `<div class="kpi-tile">
     <span class="label">${t.label}</span>
@@ -728,10 +702,9 @@ function renderAdsTable() {
 
   const BADGE = {
     kill: `<span class="badge kill">KILL</span>`,
-    winner: `<span class="badge winner">WINNER ★</span>`,
+    "keep-warn": `<span class="badge keep-warn">KEEP ⚠</span>`,
     keep: `<span class="badge keep">KEEP</span>`,
-    watch: `<span class="badge watch">WATCH</span>`,
-    protected: `<span class="badge protected">PROTECTED</span>`,
+    review: `<span class="badge review">REVIEW</span>`,
   };
 
   const tbody = document.getElementById("ads-tbody");

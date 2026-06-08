@@ -99,13 +99,12 @@
           </div>
         </header>
         <div class="ads-framework">
-          <strong>Decision rules</strong> <span class="subtle">— pixel + registrations only; Event124 is report-only and never kills</span>:<br>
-          <span class="badge kill">KILL</span> 0 regs @ $150, or @ $450 CPR &gt; $150 &amp; (CPP &gt; $350 or 0 purch) &nbsp;·&nbsp;
-          <span class="badge winner">WINNER ★</span> @ $450 CPR ≤ $100 &amp; CPP ≤ $250 &nbsp;·&nbsp;
-          <span class="badge keep">KEEP</span> any other quadrant (TOF feeder / retargeting) &nbsp;·&nbsp;
-          <span class="badge watch">WATCH</span> &lt; $150 spend — ride to gate &nbsp;·&nbsp;
-          <span class="badge protected">PROTECTED</span> Cost-Cap engine
-          <div class="subtle" style="margin-top:5px">Gates read <strong>cumulative</strong> spend — switch the window to <strong>All</strong> for true lifetime verdicts. Hover a status for its reason.</div>
+          <strong>Decision rules</strong> <span class="subtle">— Cost per Event124 × Cost per Registration</span>:<br>
+          <span class="badge kill">KILL</span> CPE124 &gt; $250 <em>and</em> CPR &gt; $100 &nbsp;·&nbsp;
+          <span class="badge keep-warn">KEEP ⚠</span> CPE124 &gt; $250 but CPR &lt; $100 (cheap leads redeem it) &nbsp;·&nbsp;
+          <span class="badge keep">KEEP</span> CPE124 ≤ $250 &nbsp;·&nbsp;
+          <span class="badge review">REVIEW</span> no Event124 yet
+          <div class="subtle" style="margin-top:5px">Manual review aid — Event124 is offline and lags, so don't replicate this in Meta automated rules. Hover a status for its reason.</div>
         </div>
         <div class="table-wrap">
           <table class="ads-table" id="ads-table">
