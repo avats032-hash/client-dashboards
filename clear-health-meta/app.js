@@ -526,8 +526,39 @@ const adsState = {
   sortCol: "spend",
   sortDir: -1,    // -1 = desc
   minSpend: 50,
+  campaignFilter: "__all__",
   adsetFilter: "__all__",
 };
+
+// Ad-level feed has no Campaign column, so map ad set → campaign.
+// IDs are authoritative (from Meta); the name fallback auto-categorises NEW
+// ad sets (PROSP testing churns new ones constantly) so they don't fall out.
+const CAMPAIGN_BY_ADSET = {
+  "120234702035320171": "👑 SCALING",
+  "120241556363980171": "👑 SCALING",
+  "120245868841650171": "Best Performers - CBO | Cost Cap",
+  "120244694395740171": "May Promo Campaign",
+  "120245133370690171": "00 - PROSP | Creative Testing",
+  "120233043435220171": "00 - PROSP | Creative Testing",
+  "120245570690500171": "00 - PROSP | Creative Testing",
+  "120243873478770171": "00 - PROSP | Creative Testing",
+  "120244258479840171": "00 - PROSP | Creative Testing",
+  "120234700995960171": "00 - PROSP | Creative Testing",
+  "120234701806420171": "00 - PROSP | Creative Testing",
+  "120246108533290171": "00 - PROSP | Creative Testing",
+  "120246662460910171": "00 - PROSP | Creative Testing",
+  "120246662852540171": "00 - PROSP | Creative Testing",
+  "120246804639770171": "00 - PROSP | Creative Testing",
+};
+
+function campaignOf(adSetId, adSetName) {
+  if (CAMPAIGN_BY_ADSET[adSetId]) return CAMPAIGN_BY_ADSET[adSetId];
+  const n = adSetName || "";
+  if (/cost[\s-]?cap|best\s*perform/i.test(n)) return "Best Performers - CBO | Cost Cap";
+  if (/promo/i.test(n)) return "May Promo Campaign";
+  if (/scaling/i.test(n)) return "👑 SCALING";
+  return "00 - PROSP | Creative Testing"; // default: new test ad sets land here
+}
 
 // ── Framework decision gates ──────────────────────────────
 // Source: Clients/Clear health/clear-health-creative-testing-scaling-framework.md
@@ -551,12 +582,12 @@ function isCostCap(adSetName) {
 // Returns { code, reason } per the framework creative lifecycle.
 // NOTE: gates read CUMULATIVE spend — use the "All" window for true lifetime verdicts.
 function adsStatus(ad) {
-  const { spend, registrations, purchases, cpr, cpp, adSetName } = ad;
+  const { spend, registrations, purchases, cpr, cpp, campaign, adSetName } = ad;
   const d = n => (n == null ? "∞" : "$" + Math.round(n));
 
   // Cost-Cap CBO = graduated winners. Exempt from test-stage kills — judged on
   // fatigue / 7-day rolling CAC manually (Stage 8), never auto-killed.
-  if (isCostCap(adSetName))
+  if (isCostCap(campaign || adSetName))
     return { code: "protected", reason: "Cost-Cap engine — graduated winner; judge on fatigue, exempt from test-stage kills" };
 
   // Below the registration gate: not enough spend to judge. The soft-metric screen
@@ -614,6 +645,7 @@ function aggregateAds(rows) {
         adName: r["Ad Name"],
         adSetName: r["Ad Set Name"],
         adSetId: r["Ad Set ID"],
+        campaign: campaignOf(r["Ad Set ID"], r["Ad Set Name"]),
         spend: 0, event124: 0, registrations: 0, purchases: 0,
       });
     }
@@ -670,6 +702,9 @@ function renderAdsTable() {
 
   // Filters
   ads = ads.filter(a => a.spend >= adsState.minSpend);
+  if (adsState.campaignFilter !== "__all__") {
+    ads = ads.filter(a => a.campaign === adsState.campaignFilter);
+  }
   if (adsState.adsetFilter !== "__all__") {
     ads = ads.filter(a => a.adSetId === adsState.adsetFilter);
   }
@@ -726,9 +761,21 @@ function renderAdsTable() {
   });
 }
 
+function populateCampaignFilter(rows) {
+  const sel = document.getElementById("ads-campaign-filter");
+  if (!sel) return;
+  const campaigns = [...new Set(rows.map(r => campaignOf(r["Ad Set ID"], r["Ad Set Name"])))].sort();
+  sel.innerHTML = `<option value="__all__">All Campaigns</option>` +
+    campaigns.map(c => `<option value="${c.replace(/"/g,"&quot;")}">${c}</option>`).join("");
+}
+
 function populateAdsetFilter(rows) {
   const sel = document.getElementById("ads-adset-filter");
-  const adsets = [...new Map(rows.map(r => [r["Ad Set ID"], r["Ad Set Name"]])).entries()]
+  // Narrow the ad-set list to the selected campaign.
+  const scoped = adsState.campaignFilter === "__all__"
+    ? rows
+    : rows.filter(r => campaignOf(r["Ad Set ID"], r["Ad Set Name"]) === adsState.campaignFilter);
+  const adsets = [...new Map(scoped.map(r => [r["Ad Set ID"], r["Ad Set Name"]])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
   sel.innerHTML = `<option value="__all__">All Ad Sets</option>` +
     adsets.map(([id, name]) => `<option value="${id}">${name}</option>`).join("");
@@ -748,6 +795,13 @@ function wireAdsEvents() {
     adsState.minSpend = parseFloat(e.target.value) || 0;
     renderAdsTable();
   });
+  const campaignFilter = document.getElementById("ads-campaign-filter");
+  if (campaignFilter) campaignFilter.addEventListener("change", e => {
+    adsState.campaignFilter = e.target.value;
+    adsState.adsetFilter = "__all__";          // reset ad set when campaign changes
+    populateAdsetFilter(adsState.rows);        // narrow ad-set list to this campaign
+    renderAdsTable();
+  });
   const adsetFilter = document.getElementById("ads-adset-filter");
   if (adsetFilter) adsetFilter.addEventListener("change", e => {
     adsState.adsetFilter = e.target.value;
@@ -761,6 +815,7 @@ async function loadAdsData() {
     if (!res.ok) throw new Error(res.status);
     const json = await res.json();
     adsState.rows = json.rows || [];
+    populateCampaignFilter(adsState.rows);
     populateAdsetFilter(adsState.rows);
     const updated = json.updated || "";
     document.getElementById("ads-updated").textContent = updated ? "Updated " + updated : "";
