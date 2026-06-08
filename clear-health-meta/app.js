@@ -572,28 +572,41 @@ function campaignOf(adSetId, adSetName) {
 // lags, so do NOT replicate this in Meta automated rules (it would pause ads before
 // their true purchases land).
 const DEC = {
-  CPE124_MAX: 250,  // cost / Event124 — above this is "bad"
-  CPR_MAX: 100,     // cost / registration — above this is "bad"
+  CPE124_MAX: 250,   // cost / Event124 — above this is "bad"
+  CPR_MAX: 100,      // cost / registration — above this is "bad"
+  // Pixel/registration fallback for ads with no Event124 yet:
+  REG_GATE: 150,     // $ spent with 0 leads ⇒ nothing to show
+  MATRIX_GATE: 450,  // $ spent to apply the CPReg×CPP matrix kill
+  CPR_WEAK: 150,     // CPReg above this is "weak" (≤$100 = cheap-lead feeder, protected)
+  CPP_WEAK: 350,     // pixel cost/purchase above this is "weak"
 };
 
 function adsStatus(ad) {
-  const { cpe124, cpr } = ad;
+  const { cpe124, cpr, cpp, spend, registrations, purchases } = ad;
   const d = n => (n == null ? "—" : "$" + Math.round(n));
 
-  // No Event124 yet ⇒ can't judge on the purchase metric.
-  if (cpe124 === null)
-    return { code: "review", reason: "No Event124 yet — can't judge cost/purchase" };
-
-  if (cpe124 > DEC.CPE124_MAX) {
-    // High purchase cost, but cheap registrations redeem it ⇒ keep (watch).
-    if (cpr !== null && cpr < DEC.CPR_MAX)
-      return { code: "keep-warn", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} but cheap regs (CPR ${d(cpr)} <$${DEC.CPR_MAX}) — keep` };
-    // High purchase cost AND no cheap-lead signal ⇒ kill.
-    return { code: "kill", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} & CPR ${d(cpr)} (>$${DEC.CPR_MAX}) — kill` };
+  // ── Primary: Event124 (true offline purchase) available ──────────────
+  if (cpe124 !== null) {
+    if (cpe124 > DEC.CPE124_MAX) {
+      // High purchase cost, but cheap registrations redeem it ⇒ keep (watch).
+      if (cpr !== null && cpr < DEC.CPR_MAX)
+        return { code: "keep-warn", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} but cheap regs (CPR ${d(cpr)} <$${DEC.CPR_MAX}) — keep` };
+      // High purchase cost AND no cheap-lead signal ⇒ kill.
+      return { code: "kill", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} & CPR ${d(cpr)} (>$${DEC.CPR_MAX}) — kill` };
+    }
+    return { code: "keep", reason: `CPE124 ${d(cpe124)} ≤$${DEC.CPE124_MAX} — keep` };
   }
 
-  // CPE124 ≤ $250 ⇒ keep, regardless of CPR.
-  return { code: "keep", reason: `CPE124 ${d(cpe124)} ≤$${DEC.CPE124_MAX} — keep` };
+  // ── Fallback: no Event124 yet — judge on pixel + registration so active
+  //    spend can't hide in REVIEW. (Gates read the selected window — use
+  //    30d / All for lifetime waste.) ───────────────────────────────────
+  if (spend >= DEC.REG_GATE && registrations === 0 && purchases === 0)
+    return { code: "kill", reason: `Reg gate: $${Math.round(spend)} spent, 0 regs & 0 purchases — nothing to show` };
+  if (spend >= DEC.MATRIX_GATE && cpr !== null && cpr > DEC.CPR_WEAK &&
+      (purchases === 0 || (cpp !== null && cpp > DEC.CPP_WEAK)))
+    return { code: "kill", reason: `Matrix kill: $${Math.round(spend)}, CPReg ${d(cpr)} (>$${DEC.CPR_WEAK}) & ${purchases === 0 ? "0 purchases" : "CPP " + d(cpp) + " (>$" + DEC.CPP_WEAK + ")"} — not a feeder` };
+
+  return { code: "review", reason: "No Event124 yet — pixel/reg signals not yet conclusive" };
 }
 
 function statusOrder(s) {
