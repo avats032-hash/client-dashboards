@@ -193,8 +193,12 @@ main {
   font-size: 11px; font-weight: 600; white-space: nowrap;
 }
 .badge.kill       { background: #fee2e2; color: #b91c1c; }
-.badge.keep-warn  { background: #fef3c7; color: #92400e; }
+.badge.winner     { background: #ede9fe; color: #6d28d9; }
 .badge.keep       { background: #dcfce7; color: #166534; }
+.badge.watch      { background: #f1f5f9; color: #475569; }
+.badge.protected  { background: #cffafe; color: #155e75; }
+/* legacy classes kept for safety */
+.badge.keep-warn  { background: #fef3c7; color: #92400e; }
 .badge.review     { background: #f1f5f9; color: #475569; }
 
 .table-wrap { overflow-x: auto; margin-top: 4px; }
@@ -213,8 +217,12 @@ main {
 .ads-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .ads-table tr:hover td { background: #f8fafc; }
 .ads-table tr.row-kill td:first-child { border-left: 3px solid #ef4444; }
-.ads-table tr.row-keep-warn td:first-child { border-left: 3px solid #f59e0b; }
+.ads-table tr.row-winner td:first-child { border-left: 3px solid #8b5cf6; }
 .ads-table tr.row-keep td:first-child { border-left: 3px solid #10b981; }
+.ads-table tr.row-watch td:first-child { border-left: 3px solid #94a3b8; }
+.ads-table tr.row-protected td:first-child { border-left: 3px solid #06b6d4; }
+/* legacy */
+.ads-table tr.row-keep-warn td:first-child { border-left: 3px solid #f59e0b; }
 .ads-table tr.row-review td:first-child { border-left: 3px solid #94a3b8; }
 
 .table-footer { font-size: 12px; color: var(--text-soft); padding-top: 8px; text-align: right; }
