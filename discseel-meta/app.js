@@ -74,6 +74,9 @@ function loadRows(csvText) {
     resultType: idx("Result Type"),
     results: idx("Results"),
     cpa: idx("Cost / Result ($)"),
+    campaignStatus: idx("Campaign status") !== -1 ? idx("Campaign status")
+                  : idx("Delivery") !== -1 ? idx("Delivery")
+                  : idx("Status"),
   };
   const hasAdset = col.adset !== -1;
   const out = [];
@@ -101,6 +104,7 @@ function loadRows(csvText) {
       results,
       cpa: num(r[col.cpa]),
       conversions: isConversion ? results : 0,
+      campaignStatus: col.campaignStatus !== -1 ? (r[col.campaignStatus] || "").trim() : "",
     });
   }
   return { rows: out, hasAdset };
@@ -133,6 +137,16 @@ function filterByWindow(rows, days) {
   if (!range) return [];
   const cutoff = addDays(range.max, -(days - 1));
   return rows.filter(r => parseDate(r.date) >= cutoff);
+}
+
+function filterByStatus(rows) {
+  if (state.statusFilter === "all") return rows;
+  return rows.filter(r => {
+    const s = (r.campaignStatus || "").toLowerCase();
+    if (state.statusFilter === "active") return s === "active" || s === "enabled";
+    if (state.statusFilter === "paused") return s === "paused";
+    return true;
+  });
 }
 
 function groupByBucket(rows, granularity) {
@@ -229,6 +243,7 @@ function metricAxisType(key) {
 const state = {
   data: { rows: [], hasAdset: false },
   windowDays: 30,
+  statusFilter: "all",
   overall: { activeMetrics: ["spend", "conversions", "linkCtr"], granularity: "weekly", chart: null },
   campaign: { activeMetrics: ["spend", "conversions"], granularity: "weekly", selectedCampaign: "__all__", selectedAdset: "__all__", chart: null },
 };
@@ -402,18 +417,20 @@ function renderSummary(stripId, total, prevTotal, items) {
 // ---------- Overall panel ----------
 
 function renderOverall() {
-  const filtered = filterByWindow(state.data.rows, state.windowDays);
+  const filtered = filterByStatus(filterByWindow(state.data.rows, state.windowDays));
   const buckets = groupByBucket(filtered, state.overall.granularity);
   if (state.overall.chart) state.overall.chart.destroy();
   state.overall.chart = buildChart("overall-chart", buckets, state.overall.activeMetrics, state.overall.granularity);
 
   const total = aggregate(filtered);
-  const prevTotal = aggregate(prevWindowRows(state.data.rows, state.windowDays));
+  const prevTotal = aggregate(filterByStatus(prevWindowRows(state.data.rows, state.windowDays)));
   renderSummary("overall-summary", total, prevTotal, [
     { key: "spend", label: "Spend" },
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks", label: "Link Clicks" },
     { key: "linkCtr", label: "Link CTR" },
+    { key: "frequency", label: "Frequency" },
+    { key: "cpm", label: "CPM" },
     { key: "conversions", label: "Conversions" },
     { key: "cpa", label: "Cost / Conv" },
   ]);
@@ -423,7 +440,7 @@ function renderOverall() {
 
 function populateCampaignDropdown() {
   const sel = document.getElementById("campaign-select");
-  const campaigns = [...new Set(state.data.rows.map(r => r.campaign).filter(Boolean))].sort();
+  const campaigns = [...new Set(filterByStatus(state.data.rows).map(r => r.campaign).filter(Boolean))].sort();
   sel.innerHTML = `<option value="__all__">All Campaigns</option>` +
     campaigns.map(c => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`).join("");
 }
@@ -439,7 +456,7 @@ function populateAdsetDropdown() {
   sel.classList.remove("hidden");
 }
 function renderCampaign() {
-  let rows = filterByWindow(state.data.rows, state.windowDays);
+  let rows = filterByStatus(filterByWindow(state.data.rows, state.windowDays));
   if (state.campaign.selectedCampaign !== "__all__") rows = rows.filter(r => r.campaign === state.campaign.selectedCampaign);
   if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") rows = rows.filter(r => r.adset === state.campaign.selectedAdset);
   const buckets = groupByBucket(rows, state.campaign.granularity);
@@ -447,7 +464,7 @@ function renderCampaign() {
   state.campaign.chart = buildChart("campaign-chart", buckets, state.campaign.activeMetrics, state.campaign.granularity);
 
   const total = aggregate(rows);
-  let _prev = prevWindowRows(state.data.rows, state.windowDays);
+  let _prev = filterByStatus(prevWindowRows(state.data.rows, state.windowDays));
   if (state.campaign.selectedCampaign !== "__all__") _prev = _prev.filter(r => r.campaign === state.campaign.selectedCampaign);
   if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") _prev = _prev.filter(r => r.adset === state.campaign.selectedAdset);
   renderSummary("campaign-summary", total, aggregate(_prev), [
@@ -455,6 +472,8 @@ function renderCampaign() {
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks", label: "Link Clicks" },
     { key: "linkCtr", label: "Link CTR" },
+    { key: "frequency", label: "Frequency" },
+    { key: "cpm", label: "CPM" },
     { key: "conversions", label: "Conversions" },
     { key: "cpa", label: "Cost / Conv" },
   ]);
@@ -499,6 +518,15 @@ function wireEvents() {
   document.getElementById("adset-select").addEventListener("change", e => {
     state.campaign.selectedAdset = e.target.value;
     renderCampaign();
+  });
+  document.getElementById("status-filter").addEventListener("change", e => {
+    state.statusFilter = e.target.value;
+    state.campaign.selectedCampaign = "__all__";
+    state.campaign.selectedAdset = "__all__";
+    populateCampaignDropdown();
+    document.getElementById("campaign-select").value = "__all__";
+    populateAdsetDropdown();
+    rerenderAll();
   });
   document.getElementById("refresh-btn").addEventListener("click", () => init(true));
 }

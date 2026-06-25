@@ -89,6 +89,12 @@ main {
   background: var(--accent); color: white; border-color: var(--accent);
 }
 .window-info { margin-left: auto; color: var(--text-soft); font-size: 12px; }
+.date-bar-sep { color: var(--border-strong); user-select: none; }
+.date-bar-select {
+  padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--card); color: var(--text); font-size: 13px; cursor: pointer;
+}
+.date-bar-select:focus { outline: none; border-color: var(--accent); }
 
 .kpi-grid {
   display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px;
