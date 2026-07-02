@@ -76,6 +76,9 @@ function loadRows(csvText) {
     resultType: idx("Result Type"),
     results:    idx("Results"),
     cpa:        idx("Cost / Result ($)"),
+    campaignStatus: idx("Campaign status") !== -1 ? idx("Campaign status")
+                  : idx("Delivery") !== -1 ? idx("Delivery")
+                  : idx("Status"),
   };
   const hasAdset = col.adset !== -1;
   const out = [];
@@ -103,6 +106,7 @@ function loadRows(csvText) {
       results,
       cpa:         num(r[col.cpa]),
       conversions: isConversion ? results : 0,
+      campaignStatus: col.campaignStatus !== -1 ? (r[col.campaignStatus] || "").trim() : "",
     });
   }
   return { rows: out, hasAdset };
@@ -135,6 +139,16 @@ function filterByWindow(rows, days) {
   if (!range) return [];
   const cutoff = addDays(range.max, -(days - 1));
   return rows.filter(r => parseDate(r.date) >= cutoff);
+}
+
+function filterByStatus(rows) {
+  if (state.statusFilter === "all") return rows;
+  return rows.filter(r => {
+    const s = (r.campaignStatus || "").toLowerCase();
+    if (state.statusFilter === "active") return s === "active" || s === "enabled";
+    if (state.statusFilter === "paused") return s === "paused";
+    return true;
+  });
 }
 
 function groupByBucket(rows, granularity) {
@@ -226,6 +240,7 @@ function metricAxisType(key) {
 const state = {
   data: { rows: [], hasAdset: false },
   windowDays: 30,
+  statusFilter: "all",
   overall:  { activeMetrics: ["spend", "conversions", "linkCtr"], granularity: "weekly", chart: null },
   campaign: { activeMetrics: ["spend", "conversions"],            granularity: "weekly", selectedCampaign: "__all__", selectedAdset: "__all__", chart: null },
 };
@@ -244,7 +259,7 @@ function prevWindowRows(allRows, days) {
 
 function renderKPIs() {
   const grid = document.getElementById("kpi-grid");
-  const filtered = filterByWindow(state.data.rows, state.windowDays);
+  const filtered = filterByStatus(filterByWindow(state.data.rows, state.windowDays));
   const totalDays = state.windowDays === "all"
     ? Math.max(1, Math.round((dateRange(filtered).max - dateRange(filtered).min) / 86400000) + 1)
     : state.windowDays;
@@ -403,12 +418,14 @@ function renderOverall() {
   state.overall.chart = buildChart("overall-chart", buckets, state.overall.activeMetrics, state.overall.granularity);
 
   const total = aggregate(filtered);
-  const prevTotal = aggregate(prevWindowRows(state.data.rows, state.windowDays));
+  const prevTotal = aggregate(filterByStatus(prevWindowRows(state.data.rows, state.windowDays)));
   renderSummary("overall-summary", total, prevTotal, [
     { key: "spend",       label: "Spend" },
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks",  label: "Link Clicks" },
     { key: "linkCtr",     label: "Link CTR" },
+    { key: "frequency",   label: "Frequency" },
+    { key: "cpm",          label: "CPM" },
     { key: "conversions", label: "Conversions" },
     { key: "cpa",         label: "Cost / Conv" },
   ]);
@@ -418,7 +435,7 @@ function renderOverall() {
 
 function populateCampaignDropdown() {
   const sel = document.getElementById("campaign-select");
-  const campaigns = [...new Set(state.data.rows.map(r => r.campaign).filter(Boolean))].sort();
+  const campaigns = [...new Set(filterByStatus(state.data.rows).map(r => r.campaign).filter(Boolean))].sort();
   sel.innerHTML = `<option value="__all__">All Campaigns</option>` +
     campaigns.map(c => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`).join("");
 }
@@ -434,7 +451,7 @@ function populateAdsetDropdown() {
   sel.classList.remove("hidden");
 }
 function renderCampaign() {
-  let rows = filterByWindow(state.data.rows, state.windowDays);
+  let rows = filterByStatus(filterByWindow(state.data.rows, state.windowDays));
   if (state.campaign.selectedCampaign !== "__all__") rows = rows.filter(r => r.campaign === state.campaign.selectedCampaign);
   if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") rows = rows.filter(r => r.adset === state.campaign.selectedAdset);
   const buckets = groupByBucket(rows, state.campaign.granularity);
@@ -442,7 +459,7 @@ function renderCampaign() {
   state.campaign.chart = buildChart("campaign-chart", buckets, state.campaign.activeMetrics, state.campaign.granularity);
 
   const total = aggregate(rows);
-  let _prev = prevWindowRows(state.data.rows, state.windowDays);
+  let _prev = filterByStatus(prevWindowRows(state.data.rows, state.windowDays));
   if (state.campaign.selectedCampaign !== "__all__") _prev = _prev.filter(r => r.campaign === state.campaign.selectedCampaign);
   if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") _prev = _prev.filter(r => r.adset === state.campaign.selectedAdset);
   renderSummary("campaign-summary", total, aggregate(_prev), [
@@ -450,6 +467,8 @@ function renderCampaign() {
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks",  label: "Link Clicks" },
     { key: "linkCtr",     label: "Link CTR" },
+    { key: "frequency",   label: "Frequency" },
+    { key: "cpm",          label: "CPM" },
     { key: "conversions", label: "Conversions" },
     { key: "cpa",         label: "Cost / Conv" },
   ]);
@@ -457,7 +476,11 @@ function renderCampaign() {
 
 // ---------- Wiring ----------
 
-function rerenderAll() { renderKPIs(); renderOverall(); renderCampaign(); }
+function rerenderAll() {
+  renderKPIs(); renderOverall(); renderCampaign();
+  const adsEl = document.getElementById("tab-ads");
+  if (adsEl && !adsEl.classList.contains("hidden")) renderAdsTable();
+}
 
 function wireEvents() {
   document.querySelectorAll("#date-quick button").forEach(b => {
@@ -495,6 +518,15 @@ function wireEvents() {
     state.campaign.selectedAdset = e.target.value;
     renderCampaign();
   });
+  document.getElementById("status-filter").addEventListener("change", e => {
+    state.statusFilter = e.target.value;
+    state.campaign.selectedCampaign = "__all__";
+    state.campaign.selectedAdset = "__all__";
+    populateCampaignDropdown();
+    document.getElementById("campaign-select").value = "__all__";
+    populateAdsetDropdown();
+    rerenderAll();
+  });
   document.getElementById("refresh-btn").addEventListener("click", () => init(true));
 }
 
@@ -522,6 +554,8 @@ async function init(force = false) {
 
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
+
+    loadAdsData();
   } catch (err) {
     console.error(err);
     document.getElementById("loading").innerHTML =
@@ -529,7 +563,268 @@ async function init(force = false) {
   }
 }
 
+
+// ─────────────────────────────────────────────
+// ADS / CREATIVE AUDIT TAB
+// ─────────────────────────────────────────────
+
+const ADS_JSON_URL = "./data/ads.json";
+
+const adsState = {
+  rows: [],
+  loaded: false,
+  sortCol: "spend",
+  sortDir: -1,
+  minSpend: 50,
+  campaignFilter: "__all__",
+  adsetFilter: "__all__",
+};
+
+// Map adset IDs → campaign names. Populate per client once creative sync is wired up.
+const CAMPAIGN_BY_ADSET = {};
+
+function campaignOf(adSetId, adSetName) {
+  if (CAMPAIGN_BY_ADSET[adSetId]) return CAMPAIGN_BY_ADSET[adSetId];
+  return adSetName || "Unknown";
+}
+
+const DEC = {
+  CPE124_MAX: 250,
+  CPR_MAX: 100,
+  REG_GATE: 150,
+  MATRIX_GATE: 450,
+  CPR_WEAK: 150,
+  CPP_WEAK: 350,
+};
+
+function adsStatus(ad) {
+  const { cpe124, cpr, cpp, spend, registrations, purchases } = ad;
+  const d = n => (n == null ? "—" : "$" + Math.round(n));
+  if (cpe124 !== null) {
+    if (cpe124 > DEC.CPE124_MAX) {
+      if (cpr !== null && cpr < DEC.CPR_MAX)
+        return { code: "keep-warn", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} but cheap regs — keep` };
+      return { code: "kill", reason: `CPE124 ${d(cpe124)} >$${DEC.CPE124_MAX} & CPR ${d(cpr)} — kill` };
+    }
+    return { code: "keep", reason: `CPE124 ${d(cpe124)} \u2264$${DEC.CPE124_MAX} — keep` };
+  }
+  if (spend >= DEC.REG_GATE && registrations === 0 && purchases === 0)
+    return { code: "kill", reason: `$${Math.round(spend)} spent, 0 regs & 0 purchases` };
+  if (spend >= DEC.MATRIX_GATE && cpr !== null && cpr > DEC.CPR_WEAK &&
+      (purchases === 0 || (cpp !== null && cpp > DEC.CPP_WEAK)))
+    return { code: "kill", reason: `Matrix kill: $${Math.round(spend)}, CPReg ${d(cpr)} & ${purchases === 0 ? "0 purchases" : "CPP " + d(cpp)}` };
+  return { code: "review", reason: "No Event124 yet — not yet conclusive" };
+}
+
+function statusOrder(s) {
+  return { kill: 0, "keep-warn": 1, review: 2, keep: 3 }[s] ?? 4;
+}
+
+function filterAdsRows(allRows, days) {
+  if (!allRows.length) return [];
+  const range = dateRange(state.data.rows);
+  if (!range) return allRows;
+  if (days === "all") return allRows;
+  const cutoff = fmtDate(addDays(range.max, -(days - 1)));
+  return allRows.filter(r => r.Date >= cutoff);
+}
+
+function aggregateAds(rows) {
+  const byAd = new Map();
+  for (const r of rows) {
+    const key = r["Ad ID"];
+    if (!byAd.has(key)) {
+      byAd.set(key, {
+        adId: key, adName: r["Ad Name"], adSetName: r["Ad Set Name"],
+        adSetId: r["Ad Set ID"], campaign: campaignOf(r["Ad Set ID"], r["Ad Set Name"]),
+        spend: 0, event124: 0, registrations: 0, purchases: 0,
+      });
+    }
+    const g = byAd.get(key);
+    g.spend         += r["Spend"] || 0;
+    g.event124      += r["Event124"] || 0;
+    g.registrations += r["Registrations"] || 0;
+    g.purchases     += r["Purchases"] || 0;
+  }
+  const out = [];
+  for (const g of byAd.values()) {
+    g.spend  = Math.round(g.spend * 100) / 100;
+    g.cpe124 = g.event124 > 0 ? Math.round(g.spend / g.event124 * 100) / 100 : null;
+    g.cpr    = g.registrations > 0 ? Math.round(g.spend / g.registrations * 100) / 100 : null;
+    g.cpp    = g.purchases > 0 ? Math.round(g.spend / g.purchases * 100) / 100 : null;
+    const v  = adsStatus(g); g.status = v.code; g.statusReason = v.reason;
+    out.push(g);
+  }
+  return out;
+}
+
+function renderAdsKPIs(ads) {
+  const grid = document.getElementById("ads-kpi-grid");
+  const totalSpend  = ads.reduce((s, a) => s + a.spend, 0);
+  const totalEv     = ads.reduce((s, a) => s + a.event124, 0);
+  const totalRegs   = ads.reduce((s, a) => s + a.registrations, 0);
+  const totalPurch  = ads.reduce((s, a) => s + a.purchases, 0);
+  const blendedCPE  = totalEv   > 0 ? totalSpend / totalEv   : null;
+  const blendedCPR  = totalRegs > 0 ? totalSpend / totalRegs : null;
+  const blendedCPP  = totalPurch > 0 ? totalSpend / totalPurch : null;
+  const killCount   = ads.filter(a => a.status === "kill").length;
+  const keepCount   = ads.filter(a => a.status === "keep" || a.status === "keep-warn").length;
+  const reviewCount = ads.filter(a => a.status === "review").length;
+  const tiles = [
+    { label: "Total Spend",   value: "$" + totalSpend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}), color: "#f59e0b" },
+    { label: "Event124",      value: totalEv.toLocaleString(),   sub: blendedCPE ? "CPE $" + blendedCPE.toFixed(2) : "—", color: "#6366f1" },
+    { label: "Registrations", value: totalRegs.toLocaleString(), sub: blendedCPR ? "CPR $" + blendedCPR.toFixed(2) : "—", color: "#06b6d4" },
+    { label: "Purchases",     value: totalPurch.toLocaleString(), sub: blendedCPP ? "CPP $" + blendedCPP.toFixed(2) : "—", color: "#10b981" },
+    { label: "Kill Signals",  value: killCount, sub: `${keepCount} keep · ${reviewCount} review`, color: "#ef4444" },
+  ];
+  grid.innerHTML = tiles.map(t => `<div class="kpi-tile">
+    <span class="label">${t.label}</span>
+    <span class="value" style="color:${t.color}">${t.value}</span>
+    ${t.sub ? `<span class="prev">${t.sub}</span>` : ""}
+  </div>`).join("");
+}
+
+function renderAdsTable() {
+  const windowRows = filterAdsRows(adsState.rows, state.windowDays);
+  let ads = aggregateAds(windowRows);
+
+  if (adsState.loaded && adsState.rows.length === 0) {
+    document.getElementById("ads-kpi-grid").innerHTML = "";
+    document.getElementById("ads-tbody").innerHTML =
+      `<tr><td colspan="10" style="text-align:center;padding:40px;color:#94a3b8">No creative data yet — ad-level sync not configured for this client.</td></tr>`;
+    document.getElementById("ads-footer").textContent = "";
+    return;
+  }
+
+  ads = ads.filter(a => a.spend >= adsState.minSpend);
+  if (adsState.campaignFilter !== "__all__") ads = ads.filter(a => a.campaign === adsState.campaignFilter);
+  if (adsState.adsetFilter !== "__all__") ads = ads.filter(a => a.adSetId === adsState.adsetFilter);
+
+  const col = adsState.sortCol, dir = adsState.sortDir;
+  ads.sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (col === "status") { va = statusOrder(va); vb = statusOrder(vb); }
+    if (va === null || va === undefined) va = dir > 0 ? -Infinity : Infinity;
+    if (vb === null || vb === undefined) vb = dir > 0 ? -Infinity : Infinity;
+    if (typeof va === "string") return dir * va.localeCompare(vb);
+    return dir * (va - vb);
+  });
+
+  renderAdsKPIs(ads);
+
+  const $c = v => v != null ? "$" + v.toFixed(2) : "—";
+  const $n = v => v ? v.toLocaleString() : "—";
+  const BADGE = {
+    kill: `<span class="badge kill">KILL</span>`,
+    "keep-warn": `<span class="badge keep-warn">KEEP ⚠</span>`,
+    keep: `<span class="badge keep">KEEP</span>`,
+    review: `<span class="badge review">REVIEW</span>`,
+  };
+
+  const tbody = document.getElementById("ads-tbody");
+  tbody.innerHTML = ads.map(a => {
+    const name = a.adName.length > 55 ? a.adName.slice(0, 55) + "…" : a.adName;
+    return `<tr class="row-${a.status}">
+      <td title="${a.adName.replace(/"/g,'&quot;')}">${name}</td>
+      <td>${a.adSetName}</td>
+      <td class="num">$${a.spend.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="num">${$n(a.event124)}</td>
+      <td class="num">${$c(a.cpe124)}</td>
+      <td class="num">${$n(a.registrations)}</td>
+      <td class="num">${$c(a.cpr)}</td>
+      <td class="num">${$n(a.purchases)}</td>
+      <td class="num">${$c(a.cpp)}</td>
+      <td title="${(a.statusReason || '').replace(/"/g,'&quot;')}">${BADGE[a.status] || ""}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("ads-footer").textContent =
+    `${ads.length} creatives · window: ${state.windowDays === "all" ? "all time" : state.windowDays + "d"} · min spend $${adsState.minSpend}`;
+
+  document.querySelectorAll("#ads-table th").forEach(th => {
+    th.classList.remove("sort-asc", "sort-desc");
+    if (th.dataset.col === col) th.classList.add(dir > 0 ? "sort-asc" : "sort-desc");
+  });
+}
+
+function populateCampaignFilter(rows) {
+  const sel = document.getElementById("ads-campaign-filter");
+  if (!sel) return;
+  const campaigns = [...new Set(rows.map(r => campaignOf(r["Ad Set ID"], r["Ad Set Name"])))].sort();
+  sel.innerHTML = `<option value="__all__">All Campaigns</option>` +
+    campaigns.map(c => `<option value="${c.replace(/"/g,"&quot;")}">${c}</option>`).join("");
+}
+
+function populateAdsetFilter(rows) {
+  const sel = document.getElementById("ads-adset-filter");
+  const scoped = adsState.campaignFilter === "__all__"
+    ? rows
+    : rows.filter(r => campaignOf(r["Ad Set ID"], r["Ad Set Name"]) === adsState.campaignFilter);
+  const adsets = [...new Map(scoped.map(r => [r["Ad Set ID"], r["Ad Set Name"]])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  sel.innerHTML = `<option value="__all__">All Ad Sets</option>` +
+    adsets.map(([id, name]) => `<option value="${id}">${name}</option>`).join("");
+}
+
+function wireAdsEvents() {
+  document.querySelectorAll("#ads-table th.sortable").forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (adsState.sortCol === col) adsState.sortDir *= -1;
+      else { adsState.sortCol = col; adsState.sortDir = col === "adName" || col === "adSetName" || col === "status" ? 1 : -1; }
+      renderAdsTable();
+    });
+  });
+  const minSpend = document.getElementById("ads-min-spend");
+  if (minSpend) minSpend.addEventListener("change", e => { adsState.minSpend = parseFloat(e.target.value) || 0; renderAdsTable(); });
+  const campaignFilter = document.getElementById("ads-campaign-filter");
+  if (campaignFilter) campaignFilter.addEventListener("change", e => {
+    adsState.campaignFilter = e.target.value; adsState.adsetFilter = "__all__";
+    populateAdsetFilter(adsState.rows); renderAdsTable();
+  });
+  const adsetFilter = document.getElementById("ads-adset-filter");
+  if (adsetFilter) adsetFilter.addEventListener("change", e => { adsState.adsetFilter = e.target.value; renderAdsTable(); });
+}
+
+async function loadAdsData() {
+  try {
+    const res = await fetch(ADS_JSON_URL + "?_=" + Date.now());
+    if (!res.ok) throw new Error(res.status);
+    const json = await res.json();
+    adsState.rows = json.rows || [];
+    populateCampaignFilter(adsState.rows);
+    populateAdsetFilter(adsState.rows);
+    const updated = json.updated || "";
+    document.getElementById("ads-updated").textContent = updated ? "Updated " + updated : "";
+  } catch (err) {
+    console.warn("Could not load ads.json:", err.message);
+    adsState.rows = [];
+  } finally {
+    adsState.loaded = true;
+  }
+}
+
+function switchTab(tab) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  const campaignsEl = document.getElementById("tab-campaigns");
+  const adsEl = document.getElementById("tab-ads");
+  if (campaignsEl && adsEl) {
+    if (tab === "ads") {
+      campaignsEl.classList.add("hidden");
+      adsEl.classList.remove("hidden");
+    } else {
+      campaignsEl.classList.remove("hidden");
+      adsEl.classList.add("hidden");
+    }
+  }
+  if (tab === "ads") renderAdsTable();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   wireEvents();
+  wireAdsEvents();
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
   init();
 });
