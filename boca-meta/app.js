@@ -13,7 +13,6 @@ const METRICS = [
   { key: "spend",        label: "Spend",           color: "#f59e0b", fmt: "currency", agg: "sum" },
   { key: "impressions",  label: "Impressions",     color: "#94a3b8", fmt: "int",      agg: "sum" },
   { key: "reach",        label: "Reach",           color: "#cbd5e1", fmt: "int",      agg: "sum" },
-  { key: "frequency",    label: "Frequency",       color: "#8b5cf6", fmt: "decimal",  agg: "ratio", num: "impressions", den: "reach" },
   { key: "cpm",          label: "CPM",             color: "#ef4444", fmt: "currency", agg: "ratio", num: "spend", den: "impressions", mul: 1000 },
   { key: "clicks",       label: "Clicks (All)",    color: "#14b8a6", fmt: "int",      agg: "sum" },
   { key: "linkClicks",   label: "Link Clicks",     color: "#06b6d4", fmt: "int",      agg: "sum" },
@@ -227,7 +226,7 @@ function formatBucketLabel(dateStr, granularity) {
 
 function metricAxisType(key) {
   if (["spend", "cpm", "cpc", "cpa"].includes(key)) return "yDollar";
-  if (["ctr", "linkCtr", "frequency"].includes(key)) return "yRatio";
+  if (["ctr", "linkCtr"].includes(key)) return "yRatio";
   return "yCount";
 }
 
@@ -417,7 +416,6 @@ function renderOverall() {
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks",  label: "Link Clicks" },
     { key: "linkCtr",     label: "Link CTR" },
-    { key: "frequency",   label: "Frequency" },
     { key: "cpm",          label: "CPM" },
     { key: "conversions", label: "Leads" },
     { key: "cpa",         label: "Cost / Lead" },
@@ -460,7 +458,6 @@ function renderCampaign() {
     { key: "impressions", label: "Impressions" },
     { key: "linkClicks",  label: "Link Clicks" },
     { key: "linkCtr",     label: "Link CTR" },
-    { key: "frequency",   label: "Frequency" },
     { key: "cpm",          label: "CPM" },
     { key: "conversions", label: "Leads" },
     { key: "cpa",         label: "Cost / Lead" },
