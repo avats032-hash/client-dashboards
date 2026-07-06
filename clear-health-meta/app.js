@@ -19,6 +19,10 @@ const METRICS = [
   { key: "cpc",         label: "Cost / Link Click",    color: "#f97316", fmt: "currency", agg: "ratio", num: "spend", den: "linkClicks" },
   { key: "results",     label: "Purchases (Results)",  color: "#4f46e5", fmt: "int",      agg: "sum" },
   { key: "cpr",         label: "Cost / Purchase",      color: "#ec4899", fmt: "currency", agg: "ratio", num: "spend", den: "results" },
+  { key: "event124",    label: "Event124",             color: "#6366f1", fmt: "int",      agg: "sum" },
+  { key: "cpEvent124",  label: "Cost / Event124",      color: "#8b5cf6", fmt: "currency", agg: "ratio", num: "spend", den: "event124" },
+  { key: "registrations", label: "Registrations",      color: "#0ea5e9", fmt: "int",      agg: "sum" },
+  { key: "cpReg",       label: "Cost / Registration",  color: "#14b8a6", fmt: "currency", agg: "ratio", num: "spend", den: "registrations" },
 ];
 const METRIC_BY_KEY = Object.fromEntries(METRICS.map(m => [m.key, m]));
 
@@ -68,6 +72,8 @@ function loadRows(csvText) {
     resultType: idx("Result Type"),
     results:    idx("Results"),
     cpr:        idx("Cost / Result ($)"),
+    event124:      idx("Event124"),
+    registrations: idx("Registrations"),
   };
   const out = [];
   for (let i = 1; i < rows.length; i++) {
@@ -91,6 +97,8 @@ function loadRows(csvText) {
       resultType: (r[col.resultType] || "").trim(),
       results:    num(r[col.results]),
       cpr:        num(r[col.cpr]),
+      event124:      num(r[col.event124]),
+      registrations: num(r[col.registrations]),
     });
   }
   return out;
@@ -138,7 +146,8 @@ function previousWindowRows(rows, days) {
 }
 
 function emptyBucket(date) {
-  return { date, spend: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0, results: 0 };
+  return { date, spend: 0, impressions: 0, reach: 0, clicks: 0, linkClicks: 0, results: 0,
+           event124: 0, registrations: 0 };
 }
 
 function deriveBucket(g) {
@@ -148,6 +157,8 @@ function deriveBucket(g) {
   g.ctr       = g.impressions > 0 ? g.clicks / g.impressions * 100 : 0;
   g.linkCtr   = g.impressions > 0 ? g.linkClicks / g.impressions * 100 : 0;
   g.cpr       = g.results > 0 ? g.spend / g.results : 0;
+  g.cpEvent124= g.event124 > 0 ? g.spend / g.event124 : 0;
+  g.cpReg     = g.registrations > 0 ? g.spend / g.registrations : 0;
   return g;
 }
 
@@ -165,6 +176,8 @@ function groupByBucket(rows, granularity) {
     g.clicks     += r.clicks;
     g.linkClicks += r.linkClicks;
     g.results    += r.results;
+    g.event124   += r.event124;
+    g.registrations += r.registrations;
   }
   const sorted = [...groups.values()].sort((a, b) => a.date.localeCompare(b.date));
   for (const g of sorted) deriveBucket(g);
@@ -180,6 +193,8 @@ function aggregate(rows) {
     total.clicks     += r.clicks;
     total.linkClicks += r.linkClicks;
     total.results    += r.results;
+    total.event124   += r.event124;
+    total.registrations += r.registrations;
   }
   return deriveBucket(total);
 }
@@ -199,7 +214,7 @@ function formatMetric(value, metricKey) {
 function formatDelta(curr, prev, metricKey) {
   if (!isFinite(curr) || !isFinite(prev) || prev === 0) return { text: "—", cls: "flat" };
   const diff = (curr - prev) / prev * 100;
-  const costMetric = ["cpm", "cpc", "cpr"].includes(metricKey);
+  const costMetric = ["cpm", "cpc", "cpr", "cpEvent124", "cpReg"].includes(metricKey);
   let cls;
   if (Math.abs(diff) < 0.5) cls = "flat";
   else if (costMetric) cls = diff > 0 ? "down" : "up";
@@ -223,7 +238,7 @@ function formatBucketLabel(dateStr, granularity) {
 // ---------- Chart axis assignment ----------
 
 function metricAxisType(key) {
-  if (["spend", "cpm", "cpc", "cpr"].includes(key)) return "yDollar";
+  if (["spend", "cpm", "cpc", "cpr", "cpEvent124", "cpReg"].includes(key)) return "yDollar";
   if (["ctr", "linkCtr"].includes(key)) return "yRatio";
   return "yCount";
 }
@@ -259,6 +274,8 @@ function renderKPIs() {
     { key: "spend",   label: "Amount Spent" },
     { key: "results", label: "Purchases" },
     { key: "cpr",     label: "Cost / Purchase" },
+    { key: "event124", label: "Event124" },
+    { key: "registrations", label: "Registrations" },
     { key: "linkClicks", label: "Link Clicks" },
     { key: "cpc",     label: "Cost / Click" },
   ];
@@ -404,6 +421,10 @@ const SUMMARY_ITEMS = [
   { key: "cpc",        label: "Cost / Click" },
   { key: "results",    label: "Purchases" },
   { key: "cpr",        label: "Cost / Purchase" },
+  { key: "event124",     label: "Event124" },
+  { key: "cpEvent124",   label: "Cost / Event124" },
+  { key: "registrations",label: "Registrations" },
+  { key: "cpReg",        label: "Cost / Registration" },
   { key: "cpm",        label: "CPM" },
 ];
 
