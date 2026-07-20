@@ -95,8 +95,12 @@ function loadRows(csvText) {
       linkCtr:    num(r[col.linkCtr]),
       cpc:        num(r[col.cpc]),
       resultType: (r[col.resultType] || "").trim(),
-      results:    num(r[col.results]),
-      cpr:        num(r[col.cpr]),
+      // Only Purchase-type results count toward the Purchases KPI. Other
+      // optimization goals (e.g. ThruPlay video views on the "Isoclear
+      // Commercial - Video Views" campaign) must never roll into purchase
+      // totals — that was inflating Purchases to ~19k and crushing Cost/Purchase.
+      results:    (r[col.resultType] || "").trim() === "Purchase" ? num(r[col.results]) : 0,
+      cpr:        (r[col.resultType] || "").trim() === "Purchase" ? num(r[col.cpr]) : 0,
       event124:      num(r[col.event124]),
       registrations: num(r[col.registrations]),
     });
