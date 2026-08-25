@@ -130,12 +130,38 @@ function dateRange(rows) {
 
 // ---------- Filtering + aggregation ----------
 
-function filterByWindow(rows, days) {
+// `anchorRows` fixes where the window ends. Always pass the FULL dataset so both
+// reporting tabs describe the same calendar period: event campaigns burst and stop,
+// so anchoring on their own last active day would make "Last 30 days" mean a
+// different 30 days on each tab and the two would stop being comparable.
+function filterByWindow(rows, days, anchorRows) {
   if (days === "all") return rows;
-  const range = dateRange(rows);
+  const range = dateRange(anchorRows || rows);
   if (!range) return [];
   const cutoff = addDays(range.max, -(days - 1));
   return rows.filter(r => parseDate(r.date) >= cutoff);
+}
+
+// ---------- Reporting tabs ----------
+// The account runs two structurally different motions and they are not comparable
+// on one set of KPIs: always-on condition campaigns (Knee, Neuropathy, Stem Cell,
+// Spine, Pelvic Floor) against dated live events. Split is by campaign name, which
+// is the only marker in the data — every event campaign carries "Webinar" or
+// "Seminar". A campaign named neither falls to Evergreen.
+const EVENT_NAME_PATTERN = /webinar|seminar/i;
+
+const TABS = {
+  evergreen: { label: "Evergreen", blurb: "Always-on condition campaigns" },
+  events:    { label: "Webinar & Seminar", blurb: "Dated live-event campaigns" },
+};
+
+function isEventCampaign(name) { return EVENT_NAME_PATTERN.test(name || ""); }
+
+// Every render reads from here, never from state.data.rows directly, so the active
+// tab scopes the KPI tiles, both charts and the campaign dropdown alike.
+function scopedRows() {
+  const wantEvents = state.tab === "events";
+  return state.data.rows.filter(r => isEventCampaign(r.campaign) === wantEvents);
 }
 
 function filterByStatus(rows) {
@@ -243,15 +269,16 @@ const state = {
   data: { rows: [], hasAdset: false },
   windowDays: 30,
   statusFilter: "all",
+  tab: "evergreen",
   overall: { activeMetrics: ["spend", "conversions", "linkCtr"], granularity: "weekly", chart: null },
   campaign: { activeMetrics: ["spend", "conversions"], granularity: "weekly", selectedCampaign: "__all__", selectedAdset: "__all__", chart: null },
 };
 
 // ---------- KPI rendering ----------
 
-function prevWindowRows(allRows, days) {
+function prevWindowRows(allRows, days, anchorRows) {
   if (days === "all") return [];
-  const range = dateRange(allRows);
+  const range = dateRange(anchorRows || allRows);
   if (!range) return [];
   const cutoff = addDays(range.max, -(days - 1));
   const prevEnd = addDays(cutoff, -1);
@@ -261,19 +288,22 @@ function prevWindowRows(allRows, days) {
 
 function renderKPIs() {
   const grid = document.getElementById("kpi-grid");
-  const filtered = filterByWindow(state.data.rows, state.windowDays);
+  const scoped = scopedRows();
+  const filtered = filterByWindow(scoped, state.windowDays, state.data.rows);
+  const filteredRange = dateRange(filtered);
   const totalDays = state.windowDays === "all"
-    ? Math.max(1, Math.round((dateRange(filtered).max - dateRange(filtered).min) / 86400000) + 1)
+    ? (filteredRange ? Math.max(1, Math.round((filteredRange.max - filteredRange.min) / 86400000) + 1) : 0)
     : state.windowDays;
 
-  // Previous window of equal length, immediately preceding
+  // Previous window of equal length, immediately preceding. Anchored on the full
+  // dataset (not `scoped`) for the same reason as filterByWindow.
   const range = dateRange(state.data.rows);
   let prevRows = [];
   if (range && state.windowDays !== "all") {
     const cutoff = addDays(range.max, -(state.windowDays - 1));
     const prevEnd = addDays(cutoff, -1);
     const prevStart = addDays(prevEnd, -(state.windowDays - 1));
-    prevRows = state.data.rows.filter(r => {
+    prevRows = scoped.filter(r => {
       const d = parseDate(r.date);
       return d >= prevStart && d <= prevEnd;
     });
@@ -416,13 +446,13 @@ function renderSummary(stripId, total, prevTotal, items) {
 // ---------- Overall panel ----------
 
 function renderOverall() {
-  const filtered = filterByStatus(filterByWindow(state.data.rows, state.windowDays));
+  const filtered = filterByStatus(filterByWindow(scopedRows(), state.windowDays, state.data.rows));
   const buckets = groupByBucket(filtered, state.overall.granularity);
   if (state.overall.chart) state.overall.chart.destroy();
   state.overall.chart = buildChart("overall-chart", buckets, state.overall.activeMetrics, state.overall.granularity);
 
   const total = aggregate(filtered);
-  const prevTotal = aggregate(filterByStatus(prevWindowRows(state.data.rows, state.windowDays)));
+  const prevTotal = aggregate(filterByStatus(prevWindowRows(scopedRows(), state.windowDays, state.data.rows)));
   renderSummary("overall-summary", total, prevTotal, [
     { key: "spend", label: "Spend" },
     { key: "impressions", label: "Impressions" },
@@ -438,7 +468,7 @@ function renderOverall() {
 
 function populateCampaignDropdown() {
   const sel = document.getElementById("campaign-select");
-  const campaigns = [...new Set(filterByStatus(state.data.rows).map(r => r.campaign).filter(Boolean))].sort();
+  const campaigns = [...new Set(filterByStatus(scopedRows()).map(r => r.campaign).filter(Boolean))].sort();
   sel.innerHTML = `<option value="__all__">All Campaigns</option>` +
     campaigns.map(c => `<option value="${c.replace(/"/g, "&quot;")}">${c}</option>`).join("");
 }
@@ -446,7 +476,7 @@ function populateAdsetDropdown() {
   const sel = document.getElementById("adset-select");
   if (!state.data.hasAdset) { sel.classList.add("hidden"); return; }
   const camp = state.campaign.selectedCampaign;
-  let pool = state.data.rows;
+  let pool = scopedRows();
   if (camp !== "__all__") pool = pool.filter(r => r.campaign === camp);
   const adsets = [...new Set(pool.map(r => r.adset).filter(Boolean))].sort();
   sel.innerHTML = `<option value="__all__">All Ad Sets</option>` +
@@ -454,7 +484,7 @@ function populateAdsetDropdown() {
   sel.classList.remove("hidden");
 }
 function renderCampaign() {
-  let rows = filterByStatus(filterByWindow(state.data.rows, state.windowDays));
+  let rows = filterByStatus(filterByWindow(scopedRows(), state.windowDays, state.data.rows));
   if (state.campaign.selectedCampaign !== "__all__") rows = rows.filter(r => r.campaign === state.campaign.selectedCampaign);
   if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") rows = rows.filter(r => r.adset === state.campaign.selectedAdset);
   const buckets = groupByBucket(rows, state.campaign.granularity);
@@ -462,7 +492,7 @@ function renderCampaign() {
   state.campaign.chart = buildChart("campaign-chart", buckets, state.campaign.activeMetrics, state.campaign.granularity);
 
   const total = aggregate(rows);
-  let _prev = filterByStatus(prevWindowRows(state.data.rows, state.windowDays));
+  let _prev = filterByStatus(prevWindowRows(scopedRows(), state.windowDays, state.data.rows));
   if (state.campaign.selectedCampaign !== "__all__") _prev = _prev.filter(r => r.campaign === state.campaign.selectedCampaign);
   if (state.data.hasAdset && state.campaign.selectedAdset !== "__all__") _prev = _prev.filter(r => r.adset === state.campaign.selectedAdset);
   renderSummary("campaign-summary", total, aggregate(_prev), [
@@ -480,7 +510,35 @@ function renderCampaign() {
 
 function rerenderAll() { renderKPIs(); renderOverall(); renderCampaign(); }
 
+function setTab(tab) {
+  if (!TABS[tab] || state.tab === tab) return;
+  state.tab = tab;
+  document.querySelectorAll("#tab-bar .tab").forEach(x => {
+    const on = x.dataset.tab === tab;
+    x.classList.toggle("active", on);
+    x.setAttribute("aria-selected", String(on));
+  });
+  // Campaign lists differ per tab, so a selection carried across would filter to
+  // nothing. Reset to "All" and repopulate before re-rendering.
+  state.campaign.selectedCampaign = "__all__";
+  state.campaign.selectedAdset = "__all__";
+  populateCampaignDropdown();
+  document.getElementById("campaign-select").value = "__all__";
+  populateAdsetDropdown();
+  updateDataRange();
+  rerenderAll();
+}
+
+function updateDataRange() {
+  const n = scopedRows().length;
+  const el = document.getElementById("data-range");
+  if (el) el.textContent = `${TABS[state.tab].label} · ${n} of ${state.data.rows.length} rows`;
+}
+
 function wireEvents() {
+  document.querySelectorAll("#tab-bar .tab").forEach(b => {
+    b.addEventListener("click", () => setTab(b.dataset.tab));
+  });
   document.querySelectorAll("#date-quick button").forEach(b => {
     b.addEventListener("click", () => {
       document.querySelectorAll("#date-quick button").forEach(x => x.classList.remove("active"));
@@ -550,8 +608,7 @@ async function init(force = false) {
 
     document.getElementById("last-refreshed").textContent =
       "Refreshed " + new Date().toLocaleString();
-    document.getElementById("data-range").textContent =
-      `${state.data.rows.length} rows`;
+    updateDataRange();
 
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
